@@ -1,5 +1,5 @@
-from models.acceleration_range import AccelerationRange
-from models.gift import Gift
+from src.models.acceleration_range import AccelerationRange
+from src.models.gift import Gift
 from typing import List
 
 
@@ -19,9 +19,7 @@ class InputParser:
         gift_lines = lines[W + 1: W + 1 + G]
         gifts = self.parse_gifts(gift_lines)
 
-        gifts_dict = {g.name: g for g in gifts}
-
-        return T, D, W, G, acceleration_ranges, gifts_dict
+        return T, D, W, G, acceleration_ranges, gifts
 
     def parse_gifts(self, gift_lines: List[str]) -> List[Gift]:
         gifts = []
@@ -31,8 +29,8 @@ class InputParser:
                 name=parts[0],
                 score=int(parts[1]),
                 weight=int(parts[2]),
-                x=int(parts[3]),
-                y=int(parts[4])
+                c=int(parts[3]),
+                r=int(parts[4])
             ))
         return gifts
 
@@ -43,7 +41,7 @@ class InputParser:
         last_max_weight = 0.0
 
         for line in accel_lines:
-            l_i, a_i = map(int, line.strip().split())
+            l_i, a_i = map(int, line.strip().split(' '))
 
             ranges.append(AccelerationRange(
                 min_weight_exclusive=last_max_weight,
@@ -55,7 +53,7 @@ class InputParser:
         return ranges
 
     def parse_configuration(self, data):
-        config = data[0].strip().split()
+        config = data.strip().split(' ')
 
         T, D, W, G = map(int, config)
 
