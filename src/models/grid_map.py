@@ -3,8 +3,7 @@ from src.models.coordinate import Coordinate
 
 
 @dataclass
-class Gift:
-    name:   str
-    score:  int
-    weight: int
-    destination: 'Coordinate'
+class GridMap:
+    rows: int
+    cols: int
+    base: 'Coordinate'
