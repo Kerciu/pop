@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from src.models.velocity import Velocity
 from src.models.coordinate import Coordinate
-from src.models.gift import Gift
 
 
 @dataclass
@@ -10,22 +9,21 @@ class SleighState:
     position:     'Coordinate'
     velocity:     'Velocity'
     sleigh_weight: int
-    carrots_count: int
-    loaded_gifts: list['Gift']
-    available_gifts: list['Gift']
-    delivered_gifts: list['Gift']
+    carrot_count: int
+    loaded_gifts: list[str]
+    available_gifts: list[str]
+    delivered_gifts: list[str]
     last_action_was_acceleration: bool
 
-    @classmethod
-    def clone() -> 'SleighState':
+    def clone(self) -> 'SleighState':
         return SleighState(
-            current_time=0,
-            position=Coordinate(0, 0),
-            velocity=Velocity(0, 0),
-            sleigh_weight=0,
-            carrots_count=0,
-            loaded_gifts=[],
-            available_gifts=[],
-            delivered_gifts=[],
-            last_action_was_acceleration=False
+            current_time=self.current_time,
+            position=self.position,
+            velocity=self.velocity,
+            sleigh_weight=self.sleigh_weight,
+            carrot_count=self.carrot_count,
+            loaded_gifts=self.loaded_gifts,
+            available_gifts=self.available_gifts,
+            delivered_gifts=self.delivered_gifts,
+            last_action_was_acceleration=self.last_action_was_acceleration
         )
