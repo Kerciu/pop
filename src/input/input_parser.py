@@ -1,6 +1,8 @@
-from src.models.acceleration_range import AccelerationRange
-from src.models.gift import Gift
+from models.acceleration_range import AccelerationRange
+from models.gift import Gift
 from typing import List
+
+from models.coordinate import Coordinate
 
 
 class InputParser:
@@ -29,8 +31,7 @@ class InputParser:
                 name=parts[0],
                 score=int(parts[1]),
                 weight=int(parts[2]),
-                c=int(parts[3]),
-                r=int(parts[4])
+                destination=Coordinate(int(parts[3]), int(parts[4]))
             ))
         return gifts
 

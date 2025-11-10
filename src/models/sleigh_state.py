@@ -1,6 +1,6 @@
 from dataclasses import dataclass
-from src.models.velocity import Velocity
-from src.models.coordinate import Coordinate
+from models.velocity import Velocity
+from models.coordinate import Coordinate
 
 
 @dataclass
