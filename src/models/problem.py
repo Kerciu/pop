@@ -1,8 +1,8 @@
 from typing import List
 from dataclasses import dataclass
-from src.input.input_parser import InputParser
-from src.models.acceleration_range import AccelerationRange
-from src.models.gift import Gift
+from input.input_parser import InputParser
+from models.acceleration_range import AccelerationRange
+from models.gift import Gift
 
 @dataclass
 class Problem:

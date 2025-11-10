@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from src.models.coordinate import Coordinate
+from models.coordinate import Coordinate
 
 
 @dataclass
@@ -7,4 +7,4 @@ class Gift:
     name:   str
     score:  int
     weight: int
-    destination: 'Coordinate'
+    destination: Coordinate

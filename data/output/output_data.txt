@@ -1,0 +1,21 @@
+20
+LoadCarrots 50
+LoadGifts 0
+LoadGifts 0
+LoadGifts 0
+LoadGifts 0
+Floating 1
+Floating 1
+Floating 1
+Floating 1
+Floating 1
+Floating 1
+Floating 1
+Floating 1
+Floating 1
+Floating 1
+Floating 1
+Floating 1
+Floating 1
+Floating 1
+Floating 1

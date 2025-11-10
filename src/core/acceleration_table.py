@@ -1,10 +1,10 @@
 from dataclasses import dataclass
-from src.models.acceleration_range import AccelerationRange
+from models.acceleration_range import AccelerationRange
 
 
 @dataclass
 class AccelerationTable:
-    ranges: list['AccelerationRange']
+    ranges: list[AccelerationRange]
 
     def get_max_acceleration_for_weight(self, weight: float) -> int:
         for acceleration_range in self.ranges:
