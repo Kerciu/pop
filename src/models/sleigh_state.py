@@ -18,12 +18,12 @@ class SleighState:
     def clone(self) -> 'SleighState':
         return SleighState(
             current_time=self.current_time,
-            position=self.position,
-            velocity=self.velocity,
+            position=Coordinate(self.position.c, self.position.r),
+            velocity=Velocity(self.velocity.vc, self.velocity.vr),
             sleigh_weight=self.sleigh_weight,
             carrot_count=self.carrot_count,
-            loaded_gifts=self.loaded_gifts,
-            available_gifts=self.available_gifts,
-            delivered_gifts=self.delivered_gifts,
+            loaded_gifts=list(self.loaded_gifts),
+            available_gifts=list(self.available_gifts),
+            delivered_gifts=list(self.delivered_gifts),
             last_action_was_acceleration=self.last_action_was_acceleration
         )

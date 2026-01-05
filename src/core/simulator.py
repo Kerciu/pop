@@ -34,7 +34,7 @@ class Simulator:
             case action.LoadGifts:
                 load_gifts(new_state, parameter, self.all_gifts_map, self.lapland_pos, self.range_d)
             case action.DeliverGift:
-                deliver_gift(new_state, parameter, self.all_gifts_map, self.lapland_pos, self.range_d)
+                deliver_gift(new_state, parameter, self.all_gifts_map, self.range_d)
             case action.LoadCarrots:
                 load_carrots(new_state, parameter, self.lapland_pos, self.range_d)
             case _:
@@ -45,4 +45,4 @@ class Simulator:
 class InvalidActionError(Exception):
     def __init__(self, action):
         self.action = action
-        super.__init__(f"Action {action.name} is invalid")
+        super().__init__(f"Action {action.name} is invalid")

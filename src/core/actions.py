@@ -27,21 +27,22 @@ class Direction(Enum):
 
 def accelerate(new_state: SleighState, accel_table: AccelerationTable, acceleration: int, direction: Direction) -> SleighState:
     assert not new_state.last_action_was_acceleration
-    assert new_state.carrots_count >= 1
-    max_a = accel_table.get_max_accel(new_state.sleigh_weight)
+    assert new_state.carrot_count >= 1
+    max_a = accel_table.get_max_acceleration_for_weight(new_state.sleigh_weight)
     assert acceleration >= 0 and acceleration <= max_a
 
-    if (direction == direction.UP):
+    if (direction == Direction.UP):
         new_state.velocity.vr += acceleration
-    elif (direction == direction.DOWN):
+    elif (direction == Direction.DOWN):
         new_state.velocity.vr -= acceleration
-    elif (direction == direction.LEFT):
+    elif (direction == Direction.LEFT):
         new_state.velocity.vc -= acceleration
-    elif (direction == direction.RIGHT):
+    elif (direction == Direction.RIGHT):
         new_state.velocity.vc += acceleration
     new_state.carrot_count -= 1
     new_state.sleigh_weight -= 1
     new_state.last_action_was_acceleration = True
+    return new_state
 
 
 def floating(new_state: SleighState) -> SleighState:
@@ -49,6 +50,7 @@ def floating(new_state: SleighState) -> SleighState:
     new_state.position.r += new_state.velocity.vr
     new_state.current_time += 1
     new_state.last_action_was_acceleration = False
+    return new_state
 
 
 def load_gifts(
@@ -62,6 +64,7 @@ def load_gifts(
     new_state.available_gifts.remove(gift_name)
     new_state.loaded_gifts.append(gift_name)
     new_state.sleigh_weight += gift.weight
+    return new_state
 
 
 def deliver_gift(
@@ -75,6 +78,7 @@ def deliver_gift(
     new_state.loaded_gifts.remove(gift_name)
     new_state.delivered_gifts.append(gift_name)
     new_state.sleigh_weight -= gift.weight
+    return new_state
 
 
 def load_carrots(
@@ -85,3 +89,4 @@ def load_carrots(
 
     new_state.carrot_count += n
     new_state.sleigh_weight += n
+    return new_state

@@ -31,12 +31,17 @@ def solver_function(
         if distance(current_state.position, gift.destination) <= problem.D:
             return (Action.DeliverGift, i)
 
-    if distance(current_state.position, lapland_pos) <= problem.D:
-        if current_state.carrot_count < 50:
-            return (Action.LoadCarrots, 50)
+    dist_to_lapland = distance(current_state.position, lapland_pos)
+    if dist_to_lapland <= 1.0:
+        
+        if current_state.carrot_count < 10:
+             return (Action.LoadCarrots, 50)
 
         if len(current_state.available_gifts) > 0:
-            return (Action.LoadGifts, 0)
+            next_gift = all_gift_map[current_state.available_gifts[0]]
+            new_weight = current_state.sleigh_weight + next_gift.weight
+            if accel_table.get_max_acceleration_for_weight(new_weight) > 0:
+                return (Action.LoadGifts, 0)
 
     target_pos = lapland_pos
 
