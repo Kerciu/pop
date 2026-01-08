@@ -1,16 +1,13 @@
+import os
+
+from brain.smart_solver import SmartSolver
+from core.acceleration_table import AccelerationTable
+from core.actions import Action
+from core.simulator import Simulator
+from models.coordinate import Coordinate
 from models.problem import Problem
 from models.sleigh_state import SleighState
-from models.coordinate import Coordinate
 from models.velocity import Velocity
-from models.gift import Gift
-from core.actions import Action
-from core.acceleration_table import AccelerationTable
-from core.simulator import Simulator
-from core.distance_utils import distance
-from brain.smart_solver import SmartSolver
-from brain.greedy_solver import GreedySolver
-from typing import Tuple, Any, Mapping
-import os
 
 INPUT_DATA_PATH = os.path.join("data", "a_an_example.in.txt")
 print("Path: ", INPUT_DATA_PATH)
@@ -18,7 +15,7 @@ OUTPUT_DATA_PATH = os.path.join("data", "output", "output_data.txt")
 
 
 def write_output_file(actions_list: list[str], output_path: str):
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         f.write(f"{len(actions_list)}\n")
         for action_str in actions_list:
             f.write(f"{action_str}\n")
@@ -27,9 +24,7 @@ def write_output_file(actions_list: list[str], output_path: str):
 
 def main() -> None:
     problem: Problem = Problem(INPUT_DATA_PATH)
-    accel_table: AccelerationTable = AccelerationTable(
-        problem.acceleration_ranges
-    )
+    accel_table: AccelerationTable = AccelerationTable(problem.acceleration_ranges)
 
     all_gift_map = {gift.name: gift for gift in problem.gifts}
 
@@ -40,7 +35,8 @@ def main() -> None:
         all_gifts_map=all_gift_map,
     )
 
-    solver = GreedySolver()
+    solver = SmartSolver()
+    # solver = GreedySolver()
 
     initial_state: SleighState = SleighState(
         current_time=0,
@@ -58,7 +54,6 @@ def main() -> None:
     action_list = []
 
     while current_state.current_time < problem.T:
-
         action, parameter = solver.resolve(
             current_state, problem, accel_table, all_gift_map
         )
@@ -71,9 +66,7 @@ def main() -> None:
             break
 
         try:
-            current_state = simulator.apply_action(
-                current_state, action, parameter
-            )
+            current_state = simulator.apply_action(current_state, action, parameter)
 
             action_list.append(f"{action.name} {parameter}")
 
@@ -82,9 +75,7 @@ def main() -> None:
             if not current_state.last_action_was_acceleration:
                 try:
                     current_state = simulator.apply_action(
-                        current_state,
-                        Action.Floating,
-                        1
+                        current_state, Action.Floating, 1
                     )
                     action_list.append("Floating 1")
                 except Exception as e2:
