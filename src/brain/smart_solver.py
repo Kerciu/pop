@@ -1,7 +1,6 @@
 from enum import Enum, auto
-
 from brain.motion_control import get_move_action
-from brain.route_planner import plan_delivery_batch, sort_route_tsp
+from brain.route_planner import plan_dynamic_mission, sort_route_tsp
 from core.actions import Action
 from core.distance_utils import distance
 from models.coordinate import Coordinate
@@ -24,26 +23,33 @@ class SmartSolver:
 
         lapland = Coordinate(0, 0)
 
-        if self.mission_state == MissionState.AT_BASE:
-            if state.carrot_count < 10:
-                return Action.LoadCarrots, 20
+        if self.mission_state != MissionState.AT_BASE and self.mission_state != MissionState.RETURNING:
+            dist_to_base = distance(state.position, lapland)
+            if state.carrot_count < (dist_to_base + 5):
+                self.mission_state = MissionState.RETURNING
 
+        if self.mission_state == MissionState.AT_BASE:
             if not state.loaded_gifts:
                 if not state.available_gifts:
                     return Action.Floating, 1
 
-                to_load = plan_delivery_batch(
+                to_load_gifts, needed_carrots = plan_dynamic_mission(
                     state.available_gifts,
                     all_gifts_map,
                     state.sleigh_weight,
                     accel_table,
                 )
 
-                if not to_load:
+                if not to_load_gifts:
                     return Action.Floating, 1
 
+                current_carrots = state.carrot_count
+                if current_carrots < needed_carrots:
+                    missing = needed_carrots - current_carrots
+                    return Action.LoadCarrots, missing
+
                 try:
-                    target_gift_name = to_load[0]
+                    target_gift_name = to_load_gifts[0]
                     target_idx = state.available_gifts.index(target_gift_name)
                     return Action.LoadGifts, target_idx
                 except ValueError:
@@ -62,7 +68,6 @@ class SmartSolver:
 
             target_gift_name = self.delivery_queue[0]
             target_gift = all_gifts_map[target_gift_name]
-
             curr_dist = distance(state.position, target_gift.destination)
 
             if curr_dist <= problem.D:
@@ -73,7 +78,7 @@ class SmartSolver:
                 except ValueError:
                     self.mission_state = MissionState.RETURNING
 
-            return get_move_action(state, target_gift.destination)
+            return get_move_action(state, target_gift.destination, accel_table)
 
         if self.mission_state == MissionState.RETURNING:
             if distance(state.position, lapland) <= problem.D:
@@ -81,6 +86,6 @@ class SmartSolver:
                 self.delivery_queue = []
                 return Action.Floating, 1
 
-            return get_move_action(state, lapland)
+            return get_move_action(state, lapland, accel_table)
 
         return Action.Floating, 1

@@ -8,7 +8,7 @@ def get_stopping_distance(velocity: int) -> int:
     return (v * (v + 1)) // 2
 
 
-def get_move_action(state: SleighState, target: Coordinate) -> tuple[Action, int]:
+def get_move_action(state: SleighState, target: Coordinate, accel_table) -> tuple[Action, int]:
     dc = target.c - state.position.c
     dr = target.r - state.position.r
 
@@ -52,16 +52,19 @@ def get_move_action(state: SleighState, target: Coordinate) -> tuple[Action, int
         else:
             return Action.Floating, 1
 
+    max_power = accel_table.get_max_acceleration_for_weight(state.sleigh_weight)
+    power = max(1, max_power)
+
     if final_dir is None:
-        return Action.Floating, 1
+        return Action.Floating, power
 
     if final_dir == Direction.UP:
-        return Action.AccUp, 1
+        return Action.AccUp, power
     if final_dir == Direction.DOWN:
-        return Action.AccDown, 1
+        return Action.AccDown, power
     if final_dir == Direction.LEFT:
-        return Action.AccLeft, 1
+        return Action.AccLeft, power
     if final_dir == Direction.RIGHT:
-        return Action.AccRight, 1
+        return Action.AccRight, power
 
-    return Action.Floating, 1
+    return Action.Floating, power
