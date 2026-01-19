@@ -1,94 +1,133 @@
 import os
 
 from agents.dqn_agent import DQNAgent
-from core.acceleration_table import AccelerationTable
-from core.simulator import Simulator
+from core.distance_utils import distance
+from core.loader import load_problem
 from env.sleigh_env import SleighEnv
-from models.problem import Problem
 
-INPUT_DATA_PATH = os.path.join("data", "huge_challenge.in.txt")
+# Upewnij się, że ścieżki są poprawne
+INPUT_DATA_PATH = os.path.join("data", "b_better_hurry.in.txt")
 MODEL_PATH = os.path.join("models_saved", "dqn_santa_best.pth")
 
 
 def main():
-    # 1. Setup środowiska
-    problem = Problem(INPUT_DATA_PATH)
-    # Sprawdzamy czy Problem poprawnie załadował ranges, jeśli nie to fallback (dla bezpieczeństwa)
-    accel_ranges = (
-        problem.acceleration_ranges if hasattr(problem, "acceleration_ranges") else []
-    )
-    accel_table = AccelerationTable(accel_ranges)
+    # 1. Używamy load_problem, tak jak w train.py, żeby setup był identyczny
+    if not os.path.exists(INPUT_DATA_PATH):
+        print(f"Błąd: Nie znaleziono pliku danych: {INPUT_DATA_PATH}")
+        return
 
-    all_gift_map = {g.name: g for g in problem.gifts}
+    problem, simulator = load_problem(INPUT_DATA_PATH)
+    env = SleighEnv(problem, simulator)
 
-    sim = Simulator(problem.T, problem.D, accel_table, all_gift_map)
-    env = SleighEnv(problem, sim)
+    state_size = env.encoder.output_size
+    action_space_size = env.action_space_size
 
-    # 2. Inicjalizacja Agenta
-    agent = DQNAgent(env.encoder.output_size, env.action_space_size)
+    agent = DQNAgent(state_size, action_space_size)
 
-    # 3. Wczytanie wytrenowanego mózgu
+    # 2. Wczytywanie modelu
     if os.path.exists(MODEL_PATH):
         print(f"Wczytywanie modelu z {MODEL_PATH}...")
         try:
             agent.load(MODEL_PATH)
-        except RuntimeError:
-            print(
-                "BŁĄD: Nie można wczytać modelu. Prawdopodobnie różnica w rozmiarze akcji."
-            )
-            print(
-                f"Model na dysku ma inny rozmiar niż obecne środowisko ({env.action_space_size} akcji)."
-            )
-            print("Musisz wytrenować model od nowa (uruchom train.py).")
+            agent.policy_net.eval()  # Ustawiamy sieć w tryb ewaluacji (wyłącza dropout itp.)
+        except Exception as e:
+            print(f"Błąd wczytywania modelu: {e}")
             return
     else:
-        print("Brak zapisanego modelu! Uruchom najpierw train.py")
+        print("Błąd: Brak zapisanego modelu. Najpierw uruchom train.py.")
         return
 
-    # 4. Pętla testowa
+    # 3. Reset środowiska
     state = env.reset()
-
-    # --- POPRAWKA: Dodanie wymiaru batcha [1, 12] ---
     state = state.unsqueeze(0)
-
     done = False
     total_reward = 0
-    step_count = 0
+    step = 0
 
-    print("\n--- START SYMULACJI POKAZOWEJ ---")
+    # Zmienna pomocnicza z train.py zapobiegająca pętlom ładowania
+    last_action_was_load = False
+
+    print("\n--- START SYMULACJI (EWALUACJA) ---")
 
     while not done:
-        # Agent podejmuje decyzję (bez losowości)
-        action_id = agent.get_action(state, epsilon=0.0)
+        # --- HYBRID LOGIC (Kluczowe dla poprawnego działania) ---
+        # Musi być identyczna jak w train.py
 
-        # Wykonanie kroku
-        next_state, reward, done, info = env.step(action_id)
+        forced_action = None
+        current_state_obj = env.state
+        dist_to_base = distance(current_state_obj.position, simulator.lapland_pos)
 
-        # --- POPRAWKA: Dodanie wymiaru batcha dla następnego stanu ---
+        # 1. W BAZIE I PUSTO -> ŁADUJ PREZENTY (ID 6)
+        if (
+            dist_to_base <= problem.D
+            and not current_state_obj.loaded_gifts
+            and current_state_obj.available_gifts
+            and not last_action_was_load
+        ):
+            forced_action = 6
+
+        # 2. W BAZIE I PUSTY BAK -> ŁADUJ MARCHEWKI (ID 5)
+        # (Opcjonalnie, jeśli w train.py to miałeś)
+        elif dist_to_base <= problem.D and current_state_obj.carrot_count < 20:
+            forced_action = 5
+
+        # 3. U CELU -> DOSTARCZ (ID 7)
+        elif current_state_obj.loaded_gifts:
+            target_name = current_state_obj.loaded_gifts[0]
+            target_gift = env.gifts_map[target_name]
+            if (
+                distance(current_state_obj.position, target_gift.destination)
+                <= problem.D
+            ):
+                forced_action = 7
+
+        # --- WYBÓR AKCJI ---
+        if forced_action is not None:
+            action_id = forced_action
+            is_ai_action = False
+        else:
+            # Epsilon = 0.0 -> Czysta eksploatacja wiedzy sieci (bez losowości)
+            action_id = agent.get_action(state, epsilon=0.0)
+            is_ai_action = True
+
+        # --- WYKONANIE KROKU ---
+        next_state, reward, done, _ = env.step(action_id)
         next_state = next_state.unsqueeze(0)
 
-        # Pobieranie czytelnej nazwy akcji z mapowania środowiska
-        action_enum, param = env.ACTION_MAPPING[action_id]
-        action_name = f"{action_enum.name}({param})"
+        # Aktualizacja flagi logicznej
+        if action_id == 6 and not env.state.loaded_gifts:
+            last_action_was_load = True
+        else:
+            last_action_was_load = False
 
-        # Logowanie
+        # --- LOGOWANIE ---
+        action_enum = env.ACTION_MAPPING[action_id]
         pos = env.state.position
-        # print(
-        #     f"Krok {step_count}: {action_name:<20} -> Poz: ({pos.c:.1f}, {pos.r:.1f}) | "
-        #     f"Prezenty: {len(env.state.loaded_gifts)} | Paliwo: {env.state.carrot_count} | Nagroda: {reward:.2f}"
-        # )
+        source = "LOGIC" if not is_ai_action else "AI_NET"
+
+        # Wypisujemy co krok (lub co 10/100, jeśli za szybko leci)
+        print(
+            f"Step {step:4d} | [{source}] {action_enum.name:13} | "
+            f"Pos: {pos.c:6.0f},{pos.r:6.0f} | "
+            f"Gifts: {len(env.state.loaded_gifts):2} | "
+            f"Fuel: {env.state.carrot_count:3} | "
+            f"Reward: {reward:6.2f}"
+        )
 
         state = next_state
         total_reward += reward
-        step_count += 1
+        step += 1
 
-        # Opcjonalnie: Zwolnij tempo, żeby widzieć co się dzieje
+        # Opcjonalne spowolnienie, żebyś widział co się dzieje
         # time.sleep(0.05)
 
-    print(f"\nKoniec! Wynik końcowy: {total_reward:.2f}")
+    print("\n" + "=" * 30)
+    print("KONIEC SYMULACJI")
+    print(f"Całkowity wynik: {total_reward:.2f}")
     print(
-        f"Dostarczone prezenty: {len(env.state.delivered_gifts)} / {len(problem.gifts)}"
+        f"Dostarczono prezentów: {len(env.state.delivered_gifts)} / {len(problem.gifts)}"
     )
+    print("=" * 30)
 
 
 if __name__ == "__main__":
