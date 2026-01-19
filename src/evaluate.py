@@ -75,11 +75,10 @@ def main():
         elif current_state_obj.loaded_gifts:
             target_name = current_state_obj.loaded_gifts[0]
             target_gift = env.gifts_map[target_name]
-            if (
-                distance(current_state_obj.position, target_gift.destination)
-                <= problem.D
-            ):
-                forced_action = 7
+            dist = distance(current_state_obj.position, target_gift.destination)
+
+            if dist <= problem.D:
+                forced_action = 7  # Deliver
 
         # --- WYBÓR AKCJI ---
         if forced_action is not None:

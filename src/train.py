@@ -21,7 +21,7 @@ def main():
 
     # if os.path.exists(save_path): agent.load(save_path)
 
-    episodes = 5000
+    episodes = 3000
     epsilon = 1.0
     epsilon_decay = 0.999
     epsilon_min = 0.05
@@ -35,17 +35,17 @@ def main():
         done = False
         total_reward = 0
 
-        step_count = 0  # <--- DODAJ LICZNIK
+        # step_count = 0  # <--- DODAJ LICZNIK
         last_action_was_load = False
 
         while not done:
-            step_count += 1
-            # DEBUG: Wypisz co 10 kroków, żeby widzieć, że żyje
-            if step_count % 10 == 0:
-                print(
-                    f"\rEpizod {e}, Krok {step_count}, Paliwo: {env.state.carrot_count}, Waga: {env.state.sleigh_weight}",
-                    end="",
-                )
+            # step_count += 1
+            # # DEBUG: Wypisz co 10 kroków, żeby widzieć, że żyje
+            # if step_count % 10 == 0:
+            #     print(
+            #         f"\rEpizod {e}, Krok {step_count}, Paliwo: {env.state.carrot_count}, Waga: {env.state.sleigh_weight}",
+            #         end="",
+            #     )
             # --- OVERRIDE LOGIC ---
             forced_action = None
             current_state_obj = env.state

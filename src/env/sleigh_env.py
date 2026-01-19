@@ -171,30 +171,46 @@ class SleighEnv(gym.Env):
         target_pos = self._get_target_pos()
         curr_dist = distance(self.state.position, target_pos)
 
+        # Obliczamy prędkość całkowitą
+        velocity_mag = (self.state.velocity.vc**2 + self.state.velocity.vr**2) ** 0.5
+
+        # 1. Zmiana w nagrodzie za dystans:
+        # Dajemy nagrodę TYLKO jeśli prędkość jest rozsądna (< 50).
+        # To zniechęci do bycia rakietą.
         dist_improvement = self.prev_dist - curr_dist
         if abs(dist_improvement) < 1000:
-            reward += dist_improvement * 1.0
+            if velocity_mag < 50:
+                reward += dist_improvement * 0.5
+            else:
+                # Jeśli leci za szybko, nie dostaje nagrody za dystans, a nawet lekką karę
+                reward -= 0.1
+
         self.prev_dist = curr_dist
 
+        # 2. Kara za "Latanie nad celem":
+        # Jeśli jesteśmy blisko (< 2000), a prędkość jest ogromna (> 100), duża kara.
+        if curr_dist < 2000 and velocity_mag > 100:
+            reward -= 5.0
+
+        # Nagroda za dostarczenie (Bez zmian, bardzo wysoka)
         curr_delivered = len(self.state.delivered_gifts)
         if curr_delivered > prev_delivered:
-            reward += 500.0
+            reward += 10000.0  # Jackpot!
             new_target = self._get_target_pos()
             self.prev_dist = distance(self.state.position, new_target)
 
         reward += step_penalty
 
-        # Koniec gry?
         done = self.state.current_time >= self.problem.T
         if curr_delivered == len(self.problem.gifts):
             done = True
-            reward += 1000.0
+            reward += 20000.0
 
         if (
             abs(self.state.position.c) > self.map_limit
             or abs(self.state.position.r) > self.map_limit
         ):
             done = True
-            reward -= 50.0
+            reward -= 100.0  # Większa kara za śmierć
 
         return self.encoder.encode(self.state), reward, done, {}
