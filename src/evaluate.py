@@ -13,74 +13,93 @@ MODEL_PATH = "models_saved/dqn_santa_best.pth"
 
 def get_navigation_action(env, target_pos):
     """
-    Pomocniczy algorytm nawigacji (Autopilot).
-    Zwraca ID akcji (lub None), aby bezpiecznie dolecieć do celu.
+    Inteligentny Autopilot uwzględniający masę sań.
     """
     s = env.state
 
-    # Wektor do celu
+    # 1. Odczekanie po przyspieszeniu (wymóg fizyki)
+    if s.last_action_was_acceleration:
+        return 4  # Floating
+
+    # Wektor i dystans do celu
     dx = target_pos.c - s.position.c
     dy = target_pos.r - s.position.r
     dist = math.sqrt(dx**2 + dy**2)
 
-    # Aktualna prędkość
+    # Prędkość
     vx = s.velocity.vc
     vy = s.velocity.vr
     speed = math.sqrt(vx**2 + vy**2)
 
-    # 1. Jeśli jesteśmy bardzo blisko i mamy małą prędkość -> Czekamy na Deliver
+    # 1. Jesteśmy na miejscu -> Czekaj na Deliver
     if dist <= env.problem.D:
-        return 4  # Floating (czekamy na logikę Deliver)
+        return 4
 
-    # 2. Fizyka hamowania: Droga hamowania = v^2 / (2*a).
-    # Przyjmijmy a ok. 10 (zależy od wagi, ale bezpieczniej założyć mniej).
-    # Jeśli dist < speed^2 / 10, to musimy hamować NATYCHMIAST.
-    braking_threshold = (speed**2) / 10.0
+    # --- KLUCZOWA ZMIANA: FIZYKA HAMOWANIA ---
+    # Pobieramy aktualne możliwości przyspieszenia dla obecnej wagi
+    max_acc = env.sim.accel_table.get_max_acceleration_for_weight(s.sleigh_weight)
 
-    # Margines bezpieczeństwa (zwalniamy wcześniej)
-    if dist < braking_threshold + 500:
-        # Logika hamowania (kontrowanie prędkości)
+    # Jeśli jesteśmy przeciążeni (max_acc=0), nic nie zrobimy, dryfujemy
+    if max_acc == 0:
+        return 4
+
+    # Droga hamowania = v^2 / (2*a).
+    # Uwzględniamy, że hamowanie to cykl Acc+Float (efektywne a = max_acc / 2)
+    effective_acc = max_acc / 2.0
+    braking_distance = (speed**2) / (2 * effective_acc)
+
+    # Margines bezpieczeństwa (np. 10% + stała wartość na manewry)
+    safety_margin = braking_distance * 0.1 + 200
+    threshold = braking_distance + safety_margin
+
+    # Debug (opcjonalny, odkomentuj jeśli chcesz widzieć fizykę w akcji)
+    # if env.state.current_time % 10 == 0:
+    #    print(f"Dist: {dist:.0f} | Speed: {speed:.1f} | BrakeDist: {braking_distance:.0f} | MaxAcc: {max_acc}")
+
+    # 2. Logika Hamowania
+    if dist < threshold:
+        # Musimy zbić prędkość w osi, w której poruszamy się najszybciej
         if abs(vx) > abs(vy):
-            return (
-                2 if vx > 0 else 3
-            )  # AccLeft jeśli lecimy w prawo, AccRight jeśli w lewo
+            # Kontra pozioma: v > 0 (lewo), v < 0 (prawo)
+            return 2 if vx > 0 else 3
         else:
-            return 0 if vy > 0 else 1  # AccUp jeśli lecimy w dół, AccDown jeśli w górę
+            # Kontra pionowa: v > 0 (dół), v < 0 (góra) (w systemie gry: AccDown zmniejsza vr)
+            return 1 if vy > 0 else 0
 
-    # 3. Jeśli jesteśmy daleko, a prędkość jest mała -> Przyspieszamy w stronę celu
-    if speed < 50:  # Limit prędkości przelotowej
+    # 3. Logika Rozpędzania
+    # Limit prędkości dostosowany do wagi - im ciężej, tym wolniej latamy, żeby wyrobić na zakrętach
+    speed_limit = 50 if s.sleigh_weight > 1000 else 150
+
+    if speed < speed_limit:
         if abs(dx) > abs(dy):
-            return 3 if dx > 0 else 2  # AccRight / AccLeft
+            return 3 if dx > 0 else 2  # Prawo / Lewo
         else:
-            return 1 if dy > 0 else 0  # AccDown / AccUp
+            return (
+                0 if dy > 0 else 1
+            )  # Góra / Dół (zgodnie z logiką: cel wyżej -> AccUp)
 
-    # 4. Jeśli lecimy szybko i mniej więcej w dobrą stronę -> Dryfujemy
-    return 4  # Floating
+    return 4  # Dryfuj (utrzymuj prędkość)
 
 
 def main():
     if not os.path.exists(MODEL_PATH):
-        print("Brak modelu! Uruchom najpierw train.py")
-        return
+        print("Brak modelu (używamy autopilota).")
 
     print("Wczytywanie problemu...")
     problem, simulator = load_problem(INPUT_DATA_PATH)
     env = SleighEnv(problem, simulator)
 
-    # Sortowanie na starcie (żeby pierwszy cel był blisko)
+    # Sortowanie początkowe
     env.reset()
-    # Hack: wywołujemy sortowanie ręcznie, bo w evaluate nie ma pętli treningowej
     if env.state.available_gifts:
         env._sort_loaded_gifts()
 
     agent = DQNAgent(env.encoder.output_size, env.action_space_size)
-
     try:
         agent.load(MODEL_PATH)
-        print(f"Wczytano model z {MODEL_PATH}")
+        print("Model wczytany.")
     except:
-        print("Błąd wczytywania modelu.")
-        # W evaluate możemy lecieć nawet bez modelu, jeśli mamy dobrą logikę nawigacji!
+        pass
 
     state = env.reset()
     state = state.unsqueeze(0)
@@ -89,63 +108,50 @@ def main():
     step = 0
     last_action_was_load = False
 
-    print("\n--- START EWALUACJI Z AUTOPILOTEM ---")
+    print("\n--- START EWALUACJI ---")
 
     while not done:
-        # --- HYBRID LOGIC + AUTOPILOT ---
         forced_action = None
         current_state_obj = env.state
         dist_to_base = distance(current_state_obj.position, simulator.lapland_pos)
 
-        # A. Ładowanie (Baza)
+        # A. Baza: Ładuj
         if (
             dist_to_base <= problem.D
             and not current_state_obj.loaded_gifts
             and current_state_obj.available_gifts
             and not last_action_was_load
         ):
-            forced_action = 6  # LoadGifts
+            forced_action = 6
 
-        # B. Tankowanie (Baza)
-        elif dist_to_base <= problem.D and current_state_obj.carrot_count < 50:
-            forced_action = 5  # LoadCarrots
+        # B. Baza: Tankuj
+        elif dist_to_base <= problem.D and current_state_obj.carrot_count < 20:
+            forced_action = 5
 
-        # C. Dostarczanie i Nawigacja (W terenie)
+        # C. W terenie: Dostarczaj i Leć
         elif current_state_obj.loaded_gifts:
-            # Cel to zawsze pierwszy załadowany (bo są posortowane przez env)
             target_name = current_state_obj.loaded_gifts[0]
             target_gift = env.gifts_map[target_name]
-            dist_to_target = distance(
-                current_state_obj.position, target_gift.destination
-            )
+            dist_target = distance(current_state_obj.position, target_gift.destination)
 
-            # 1. Jesteśmy w zasięgu -> Oddaj
-            if dist_to_target <= problem.D:
-                forced_action = 7  # DeliverGift
+            if dist_target <= problem.D:
+                forced_action = 7  # Deliver
             else:
-                # 2. Jesteśmy w trasie -> Użyj Autopilota zamiast sieci
-                forced_action = get_navigation_action(env, target_gift.destination)
+                forced_action = get_navigation_action(
+                    env, target_gift.destination
+                )  # Autopilot
 
-        # D. Powrót do bazy (gdy pusto)
-        elif (
-            not current_state_obj.loaded_gifts and not current_state_obj.available_gifts
-        ):
-            # Koniec gry, czekamy
-            forced_action = 4
+        # D. Pusto: Wracaj
         elif not current_state_obj.loaded_gifts:
-            # Wracamy do bazy po nową partię
             forced_action = get_navigation_action(env, simulator.lapland_pos)
 
-        # Wybór akcji
         if forced_action is not None:
             action_id = forced_action
-            source = "LOGIC"
+            source = "AUTO"
         else:
-            # Fallback do sieci (rzadko używane przy pełnym autopilocie)
             action_id = agent.get_action(state, epsilon=0.0)
-            source = "AI_NET"
+            source = "NET"
 
-        # Wykonanie
         next_state, reward, done, _ = env.step(action_id)
 
         # Logika flagi
@@ -154,19 +160,21 @@ def main():
         else:
             last_action_was_load = False
 
-        # Logowanie (tylko co 100 kroków lub przy ważnych akcjach)
         action_enum = env.ACTION_MAPPING[action_id]
+
+        # Logowanie
         if (
-            action_enum in [Action.LoadGifts, Action.DeliverGift, Action.LoadCarrots]
-            or step % 100 == 0
+            action_enum in [Action.LoadGifts, Action.DeliverGift]
+            or step % 50 == 0
+            or done
         ):
             pos = env.state.position
             print(
-                f"Step {step:4d} | [{source:7}] {action_enum.name:13} | "
+                f"Step {step:4d} | [{source}] {action_enum.name:13} | "
                 f"Pos: {pos.c:6.0f},{pos.r:6.0f} | "
                 f"Gifts: {len(env.state.loaded_gifts):3} | "
-                f"Delivered: {len(env.state.delivered_gifts):3} | "
-                f"Reward: {reward:7.2f}"
+                f"Deliv: {len(env.state.delivered_gifts):3} | "
+                f"Reward: {reward:7.2f} | Time: {env.state.current_time}"
             )
 
         state = next_state.unsqueeze(0)
