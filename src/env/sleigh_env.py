@@ -1,273 +1,209 @@
-import gymnasium as gym
+import math
 
-from core.actions import Action, solve_knapsack_greedy
+import torch
+
 from core.distance_utils import distance
-from core.simulator import Simulator
-from env.state_encoder import StateEncoder
-from models.coordinate import Coordinate
-from models.problem import Problem
-from models.sleigh_state import SleighState
-from models.velocity import Velocity
 
 
-class SleighEnv(gym.Env):
-    def __init__(self, problem: Problem, simulator: Simulator):
+class SleighEnv:
+    # 0-3: Acc +1 (N, S, E, W) -> AUTO FLOAT
+    # 4-7: Acc MAX (N, S, E, W) -> AUTO FLOAT
+    # 8: Float (Coast) -> FLOAT
+    # 9: Load Gifts (Once per visit)
+    # 10: Fuel (Once per visit)
+    # 11: Deliver
+    ACTION_SPACE_SIZE = 12
+
+    def __init__(self, problem, simulator):
         self.problem = problem
         self.sim = simulator
-
-        # --- AUTOMATYCZNE SKALOWANIE MAPY ---
-        max_coord = 100.0  # Domyślne minimum
-        for g in problem.gifts:
-            max_coord = max(max_coord, abs(g.destination.c), abs(g.destination.r))
-
-        # Dodajemy 20% marginesu, żeby agent nie uderzał w ścianę przy krawędzi
-        self.map_limit = max_coord * 1.2
-        print(f"🌍 Wykryto rozmiar mapy: +/- {self.map_limit:.1f}")
-        # ------------------------------------
-
-        # Przekazujemy wykryty limit do Encodera
-        self.encoder = StateEncoder(problem, simulator, map_limit=self.map_limit)
-
         self.state = None
-        self.prev_dist = 0.0
-        self.gifts_map = {g.name: g for g in problem.gifts}
-        self.MAX_FUEL = 300
 
-        self.ACTION_MAPPING = {
-            0: Action.AccUp,
-            1: Action.AccDown,
-            2: Action.AccLeft,
-            3: Action.AccRight,
-            4: Action.Floating,
-            5: Action.LoadCarrots,
-            6: Action.LoadGifts,
-            7: Action.DeliverGift,
-        }
-        self.action_space_size = len(self.ACTION_MAPPING)
+        # Flagi logiczne
+        self.base_interaction_locked = False  # Bezpiecznik bazy
+        self.last_dist_to_target = 0
+
+        # Parametry normalizacji (do tensora)
+        self.max_coord = 200000.0  # Przybliżony rozmiar mapy
+        self.max_vel = 200.0  # Przybliżona max prędkość
 
     def reset(self):
-        initial_gifts = [g.name for g in self.problem.gifts]
-        self.state = SleighState(
-            current_time=0,
-            position=Coordinate(0, 0),
-            velocity=Velocity(0, 0),
-            sleigh_weight=10,
-            carrot_count=100,
-            loaded_gifts=[],
-            available_gifts=initial_gifts,
-            delivered_gifts=[],
-            last_action_was_acceleration=False,
-        )
-        target_pos = self._get_target_pos()
-        self.prev_dist = distance(self.state.position, target_pos)
-        return self.encoder.encode(self.state)
+        self.sim.reset()
+        self.state = self.sim.state
+        self.base_interaction_locked = False
+        self.last_dist_to_target = self._get_distance_to_current_target()
+        return self._get_observation()
 
-    def _get_target_pos(self):
-        if self.state.loaded_gifts:
-            g_name = self.state.loaded_gifts[0]
-            if g_name in self.gifts_map:
-                return self.gifts_map[g_name].destination
-        return self.sim.lapland_pos
-
-    def _sort_loaded_gifts(self):
-        """Sortuje załadowane prezenty od najbliższego."""
-        if not self.state.loaded_gifts:
-            return
-        current_pos = self.state.position
-        self.state.loaded_gifts.sort(
-            key=lambda g_name: distance(current_pos, self.gifts_map[g_name].destination)
-        )
-
-    def step(self, action_id: int):
-        # Domyślna kara za upływ czasu (motywacja do pośpiechu)
-        reward = -0.1
-        step_penalty = 0.0
-
-        action_enum = self.ACTION_MAPPING[action_id]
-        param = 1
-
-        # --- 1. RUCH (Akceleracja) ---
-        if action_enum in [
-            Action.AccUp,
-            Action.AccDown,
-            Action.AccLeft,
-            Action.AccRight,
-        ]:
-            max_acc = self.sim.accel_table.get_max_acceleration_for_weight(
-                self.state.sleigh_weight
-            )
-
-            # KARA: Próba ruchu bez paliwa lub przy przeciążeniu
-            if self.state.carrot_count <= 0 or max_acc == 0:
-                reward -= 10.0  # Duża kara za próbę ruchu "na pusto"
-                # Fizycznie nic się nie dzieje (lub dryfujemy), ale agent musi się nauczyć
-                # W symulatorze wywołamy Floating, żeby gra się nie sypała, ale kara jest
-                try:
-                    self.state = self.sim.apply_action(self.state, Action.Floating, 1)
-                except:
-                    pass
-            else:
-                param = max_acc
-                # Wykonanie normalnego ruchu
-                try:
-                    self.state = self.sim.apply_action(self.state, action_enum, param)
-                except Exception:
-                    # Np. złamanie zasady Acc -> Float -> Acc
-                    reward -= 20.0
-                    # Musimy "odczekać" karę dryfując
-                    try:
-                        self.state = self.sim.apply_action(
-                            self.state, Action.Floating, 1
-                        )
-                    except:
-                        pass
-
-        # --- 2. TANKOWANIE ---
-        elif action_enum == Action.LoadCarrots:
-            dist_base = distance(self.state.position, self.sim.lapland_pos)
-
-            # KARA: Tankowanie poza bazą
-            if dist_base > self.problem.D:
-                reward -= 50.0
-                # Czas płynie (zmarnowana tura na próbie tankowania)
-                self.state.current_time += 1
-            else:
-                needed = max(0, 100 - self.state.carrot_count)
-                # KARA/NAGRODA: Tankowanie
-                if needed > 0:
-                    param = needed
-                    # Nagroda jest mała, żeby nie farmił punktów tankowaniem
-                    reward += 1.0
-                    self.state = self.sim.apply_action(self.state, action_enum, param)
-                else:
-                    # Pełny bak - kara za marnowanie czasu
-                    reward -= 10.0
-                    self.state.current_time += 1  # Czas płynie
-
-        # --- 3. DOSTARCZANIE ---
-        elif action_enum == Action.DeliverGift:
-            if not self.state.loaded_gifts:
-                # KARA: Próba dostarczenia pustego worka
-                reward -= 20.0
-                self.state.current_time += 1
-            else:
-                target = self.gifts_map[self.state.loaded_gifts[0]]
-                dist_to_target = distance(self.state.position, target.destination)
-
-                if dist_to_target > self.problem.D:
-                    # KARA: Próba zrzutu za daleko od celu
-                    reward -= 20.0
-                    self.state.current_time += 1
-                else:
-                    # SUKCES: Dostarczamy
-                    param = 0
-                    prev_delivered = len(self.state.delivered_gifts)
-                    self.state = self.sim.apply_action(self.state, action_enum, param)
-
-                    # Sortujemy resztę, żeby nowy cel był [0]
-                    self._sort_loaded_gifts()
-
-                    # Sprawdzamy czy się udało (dla pewności)
-                    if len(self.state.delivered_gifts) > prev_delivered:
-                        reward += 5000.0  # WIELKA NAGRODA
-
-        # --- 4. ŁADOWANIE PREZENTÓW ---
-        elif action_enum == Action.LoadGifts:
-            dist_base = distance(self.state.position, self.sim.lapland_pos)
-
-            # KARA: Ładowanie poza bazą
-            if dist_base > self.problem.D:
-                reward -= 50.0
-                self.state.current_time += 1
-
-            # KARA: Ładowanie, gdy już mamy prezenty (w tym uproszczonym modelu lecimy full -> empty -> full)
-            # To zapobiega pętli ładowania w nieskończoność
-            elif self.state.loaded_gifts:
-                reward -= 50.0  # Bardzo bolesna kara za pętlę!
-                self.state.current_time += 1
-
-            # KARA: Brak prezentów do wzięcia
-            elif not self.state.available_gifts:
-                reward -= 10.0
-                self.state.current_time += 1
-
-            else:
-                # SUKCES: Próba załadunku
-                real_max_weight = self.sim.accel_table.ranges[-1].max_weight_inclusive
-                gifts_to_load_ids = solve_knapsack_greedy(
-                    self.state.available_gifts,
-                    self.gifts_map,
-                    real_max_weight,
-                    self.state.sleigh_weight,
-                )
-
-                if not gifts_to_load_ids:
-                    # Nic się nie zmieściło (mało prawdopodobne przy pustych saniach)
-                    reward -= 10.0
-                    self.state.current_time += 1
-                else:
-                    # Ładujemy manualnie (bez upływu czasu)
-                    try:
-                        loaded_count = 0
-                        loaded_set = set(gifts_to_load_ids)
-                        new_available = []
-                        for g_name in self.state.available_gifts:
-                            if g_name in loaded_set:
-                                gift = self.gifts_map[g_name]
-                                self.state.loaded_gifts.append(g_name)
-                                self.state.sleigh_weight += gift.weight
-                                loaded_count += 1
-                            else:
-                                new_available.append(g_name)
-                        self.state.available_gifts = new_available
-
-                        self._sort_loaded_gifts()
-                        reward += 10.0 + loaded_count * 0.5  # Nagroda za załadunek
-                    except:
-                        reward -= 50.0  # Krytyczny błąd
-
-        # --- 5. FLOATING (Dryfowanie) ---
-        elif action_enum == Action.Floating:
-            self.state = self.sim.apply_action(self.state, action_enum, 1)
-            # Mała kara za stratę czasu, chyba że czekamy na coś sensownego
-            reward -= 0.1
-
-        # --- FINALIZE STEP (Wspólne obliczenia) ---
-        return self._finalize_step_logic(reward)
-
-    def _finalize_step_logic(self, reward):
-        target_pos = self._get_target_pos()
-        curr_dist = distance(self.state.position, target_pos)
-
-        # Prędkość
-        velocity_mag = (self.state.velocity.vc**2 + self.state.velocity.vr**2) ** 0.5
-
-        # Nagroda za zbliżanie się (tylko przy rozsądnej prędkości)
-        # Aby zachęcić do latania w dobrą stronę, ale nie premiować pędu
-        dist_improvement = self.prev_dist - curr_dist
-        if abs(dist_improvement) < 1000 and velocity_mag < 80:
-            reward += dist_improvement * 0.2
-
-        self.prev_dist = curr_dist
-
-        # Warunki końca gry
+    def step(self, action_id):
+        reward = 0
         done = False
+        time_passed = 0
 
-        # 1. Koniec czasu
-        if self.state.current_time >= self.problem.T:
+        # 1. Zarządzanie bezpiecznikiem bazy (RESET flagi po wylocie)
+        dist_to_base = distance(self.state.position, self.sim.lapland_pos)
+        if self.base_interaction_locked and dist_to_base > self.problem.D:
+            self.base_interaction_locked = False
+
+        # 2. Wykonanie akcji
+        prev_dist = self.last_dist_to_target
+
+        # Grupa A: Ruch (0-8) -> Zmienia fizykę I przesuwa czas
+        if 0 <= action_id <= 8:
+            # Ustawianie przyspieszenia
+            ax, ay = 0, 0
+            if action_id < 8:
+                direction = action_id % 4  # 0=N, 1=S, 2=E, 3=W
+                is_max = action_id >= 4
+
+                acc_val = 1.0
+                if is_max:
+                    # Pobieramy max możliwe przyspieszenie dla aktualnej wagi
+                    acc_val = self.sim.accel_table.get_max_acceleration_for_weight(
+                        self.state.sleigh_weight
+                    )
+
+                if direction == 0:
+                    ay = acc_val
+                elif direction == 1:
+                    ay = -acc_val
+                elif direction == 2:
+                    ax = acc_val
+                elif direction == 3:
+                    ax = -acc_val
+
+                # Aplikujemy zmianę sterowania
+                self.sim.handle_action(ax, ay, 0, 0)  # Acc only
+
+            # AUTOMATYCZNY FLOAT DLA KAŻDEJ AKCJI RUCHOWEJ
+            self.sim.step()
+            time_passed = 1
+            reward -= 0.5  # Lekka kara za upływ czasu (presja)
+
+        # Grupa B: Interakcje w bazie (9, 10)
+        elif action_id == 9:  # Load Gifts
+            if dist_to_base <= self.problem.D and not self.base_interaction_locked:
+                if not self.state.loaded_gifts and self.state.available_gifts:
+                    self.sim.handle_action(0, 0, 1, 0)  # Load
+                    reward += 50.0
+                    self.base_interaction_locked = True
+                else:
+                    reward -= 5.0  # Kara za spamowanie bez sensu
+            else:
+                reward -= 5.0  # Kara za próbę ładowania poza bazą/zablokowaną
+
+        elif action_id == 10:  # Fuel
+            if dist_to_base <= self.problem.D and not self.base_interaction_locked:
+                if self.state.carrot_count < 20:  # Tylko jak potrzebuje
+                    self.sim.handle_action(0, 0, 0, 1)  # Fuel
+                    reward += 20.0
+                    self.base_interaction_locked = (
+                        True  # Blokujemy też tankowanie w tej wizycie
+                    )
+                else:
+                    reward -= 5.0
+            else:
+                reward -= 5.0
+
+        # Grupa C: Dostarczanie (11)
+        elif action_id == 11:  # Deliver
+            # Sprawdzamy czy jesteśmy u celu
+            if self.state.loaded_gifts:
+                gift_id = self.state.loaded_gifts[0]
+                target_gift = self.sim.all_gifts_map[gift_id]
+
+                # POPRAWKA: target_gift to obiekt Gift, musimy wziąć .destination
+                dist_to_gift = distance(self.state.position, target_gift.destination)
+
+                if dist_to_gift <= self.problem.D:
+                    self.sim.handle_action(0, 0, -1, 0)  # Deliver
+                    reward += 1000.0
+                    self.base_interaction_locked = False
+                else:
+                    reward -= 10.0  # Kara za zrzut w polu
+            else:
+                reward -= 10.0  # Nie masz co zrzucać
+
+        # 3. Aktualizacja stanu i nagrody za postęp
+        self.state = self.sim.state
+        current_dist = self._get_distance_to_current_target()
+
+        # Nagroda za zbliżanie się (Shaping) - tylko jeśli czas płynął
+        if time_passed > 0:
+            diff = prev_dist - current_dist
+            # Jeśli zbliżył się o 100 jednostek -> nagroda +10
+            # Jeśli oddalił się -> kara
+            reward += diff * 0.1
+
+        self.last_dist_to_target = current_dist
+
+        # Kary śmiertelne
+        if self.state.carrot_count <= 0:
+            reward -= 200.0
             done = True
 
-        # 2. Wszystko dostarczone
-        if len(self.state.delivered_gifts) == len(self.problem.gifts):
-            done = True
-            reward += 100000.0  # Jackpot
-
-        # 3. Wylot poza mapę
-        if (
-            abs(self.state.position.c) > self.map_limit
-            or abs(self.state.position.r) > self.map_limit
+        # Sprawdzenie końca czasu lub zadań
+        if self.state.current_time >= self.problem.T or (
+            not self.state.loaded_gifts and not self.state.available_gifts
         ):
             done = True
-            reward -= 200.0  # Śmierć
+            if not self.state.available_gifts and not self.state.loaded_gifts:
+                reward += 2000.0  # Bonus za wyczyszczenie mapy
 
-        return self.encoder.encode(self.state), reward, done, {}
+        return self._get_observation(), reward, done, {}
+
+    def _get_distance_to_current_target(self):
+        if self.state.loaded_gifts:
+            # Lecimy do klienta
+            gift_id = self.state.loaded_gifts[0]
+            # POPRAWKA: Pobieramy .destination z prezentu
+            target_pos = self.sim.all_gifts_map[gift_id].destination
+            return distance(self.state.position, target_pos)
+        else:
+            # Wracamy do bazy (lub startujemy)
+            return distance(self.state.position, self.sim.lapland_pos)
+
+    def _get_observation(self):
+        s = self.state
+
+        # Ustalanie celu
+        if s.loaded_gifts:
+            # POPRAWKA: Pobieramy .destination z prezentu
+            target_pos = self.sim.all_gifts_map[s.loaded_gifts[0]].destination
+            target_type = 1.0  # Gift
+        else:
+            target_pos = self.sim.lapland_pos
+            target_type = -1.0  # Base
+
+        dx = target_pos.c - s.position.c
+        dy = target_pos.r - s.position.r
+        dist = math.sqrt(dx**2 + dy**2)
+
+        # Fizyka hamowania (Czy muszę hamować?)
+        # Droga hamowania = v^2 / (2*a). Przyjmijmy średnie a=5.0
+        speed_sq = s.velocity.vc**2 + s.velocity.vr**2
+        braking_dist = speed_sq / (2.0 * 5.0 + 1e-5)
+        brake_warning = 1.0 if dist < (braking_dist + self.problem.D + 50) else -1.0
+
+        # Normalizacja
+        feats = [
+            s.position.c / self.max_coord,
+            s.position.r / self.max_coord,
+            s.velocity.vc / self.max_vel,
+            s.velocity.vr / self.max_vel,
+            dx / self.max_coord,
+            dy / self.max_coord,
+            dist / self.max_coord,
+            s.sleigh_weight / 5000.0,
+            s.carrot_count / 20.0,
+            1.0 if s.loaded_gifts else -1.0,  # Czy mam paczkę
+            target_type,  # Gdzie lecę
+            1.0 if dist <= self.problem.D else -1.0,  # Czy jestem w zasięgu interakcji
+            brake_warning,  # CZY HAMOWAĆ?!
+            1.0 if self.base_interaction_locked else -1.0,  # Czy bezpiecznik aktywny
+        ]
+
+        return torch.FloatTensor(feats)
+
+    @property
+    def input_size(self):
+        return 14  # Rozmiar listy feats
