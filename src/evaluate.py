@@ -1,132 +1,180 @@
+import math
 import os
 
 from agents.dqn_agent import DQNAgent
+from core.actions import Action
 from core.distance_utils import distance
 from core.loader import load_problem
 from env.sleigh_env import SleighEnv
 
-# Upewnij się, że ścieżki są poprawne
-INPUT_DATA_PATH = os.path.join("data", "b_better_hurry.in.txt")
-MODEL_PATH = os.path.join("models_saved", "dqn_santa_best.pth")
+INPUT_DATA_PATH = "data/b_better_hurry.in.txt"
+MODEL_PATH = "models_saved/dqn_santa_best.pth"
+
+
+def get_navigation_action(env, target_pos):
+    """
+    Pomocniczy algorytm nawigacji (Autopilot).
+    Zwraca ID akcji (lub None), aby bezpiecznie dolecieć do celu.
+    """
+    s = env.state
+
+    # Wektor do celu
+    dx = target_pos.c - s.position.c
+    dy = target_pos.r - s.position.r
+    dist = math.sqrt(dx**2 + dy**2)
+
+    # Aktualna prędkość
+    vx = s.velocity.vc
+    vy = s.velocity.vr
+    speed = math.sqrt(vx**2 + vy**2)
+
+    # 1. Jeśli jesteśmy bardzo blisko i mamy małą prędkość -> Czekamy na Deliver
+    if dist <= env.problem.D:
+        return 4  # Floating (czekamy na logikę Deliver)
+
+    # 2. Fizyka hamowania: Droga hamowania = v^2 / (2*a).
+    # Przyjmijmy a ok. 10 (zależy od wagi, ale bezpieczniej założyć mniej).
+    # Jeśli dist < speed^2 / 10, to musimy hamować NATYCHMIAST.
+    braking_threshold = (speed**2) / 10.0
+
+    # Margines bezpieczeństwa (zwalniamy wcześniej)
+    if dist < braking_threshold + 500:
+        # Logika hamowania (kontrowanie prędkości)
+        if abs(vx) > abs(vy):
+            return (
+                2 if vx > 0 else 3
+            )  # AccLeft jeśli lecimy w prawo, AccRight jeśli w lewo
+        else:
+            return 0 if vy > 0 else 1  # AccUp jeśli lecimy w dół, AccDown jeśli w górę
+
+    # 3. Jeśli jesteśmy daleko, a prędkość jest mała -> Przyspieszamy w stronę celu
+    if speed < 50:  # Limit prędkości przelotowej
+        if abs(dx) > abs(dy):
+            return 3 if dx > 0 else 2  # AccRight / AccLeft
+        else:
+            return 1 if dy > 0 else 0  # AccDown / AccUp
+
+    # 4. Jeśli lecimy szybko i mniej więcej w dobrą stronę -> Dryfujemy
+    return 4  # Floating
 
 
 def main():
-    # 1. Używamy load_problem, tak jak w train.py, żeby setup był identyczny
-    if not os.path.exists(INPUT_DATA_PATH):
-        print(f"Błąd: Nie znaleziono pliku danych: {INPUT_DATA_PATH}")
+    if not os.path.exists(MODEL_PATH):
+        print("Brak modelu! Uruchom najpierw train.py")
         return
 
+    print("Wczytywanie problemu...")
     problem, simulator = load_problem(INPUT_DATA_PATH)
     env = SleighEnv(problem, simulator)
 
-    state_size = env.encoder.output_size
-    action_space_size = env.action_space_size
+    # Sortowanie na starcie (żeby pierwszy cel był blisko)
+    env.reset()
+    # Hack: wywołujemy sortowanie ręcznie, bo w evaluate nie ma pętli treningowej
+    if env.state.available_gifts:
+        env._sort_loaded_gifts()
 
-    agent = DQNAgent(state_size, action_space_size)
+    agent = DQNAgent(env.encoder.output_size, env.action_space_size)
 
-    # 2. Wczytywanie modelu
-    if os.path.exists(MODEL_PATH):
-        print(f"Wczytywanie modelu z {MODEL_PATH}...")
-        try:
-            agent.load(MODEL_PATH)
-            agent.policy_net.eval()  # Ustawiamy sieć w tryb ewaluacji (wyłącza dropout itp.)
-        except Exception as e:
-            print(f"Błąd wczytywania modelu: {e}")
-            return
-    else:
-        print("Błąd: Brak zapisanego modelu. Najpierw uruchom train.py.")
-        return
+    try:
+        agent.load(MODEL_PATH)
+        print(f"Wczytano model z {MODEL_PATH}")
+    except:
+        print("Błąd wczytywania modelu.")
+        # W evaluate możemy lecieć nawet bez modelu, jeśli mamy dobrą logikę nawigacji!
 
-    # 3. Reset środowiska
     state = env.reset()
     state = state.unsqueeze(0)
     done = False
     total_reward = 0
     step = 0
-
-    # Zmienna pomocnicza z train.py zapobiegająca pętlom ładowania
     last_action_was_load = False
 
-    print("\n--- START SYMULACJI (EWALUACJA) ---")
+    print("\n--- START EWALUACJI Z AUTOPILOTEM ---")
 
     while not done:
-        # --- HYBRID LOGIC (Kluczowe dla poprawnego działania) ---
-        # Musi być identyczna jak w train.py
-
+        # --- HYBRID LOGIC + AUTOPILOT ---
         forced_action = None
         current_state_obj = env.state
         dist_to_base = distance(current_state_obj.position, simulator.lapland_pos)
 
-        # 1. W BAZIE I PUSTO -> ŁADUJ PREZENTY (ID 6)
+        # A. Ładowanie (Baza)
         if (
             dist_to_base <= problem.D
             and not current_state_obj.loaded_gifts
             and current_state_obj.available_gifts
             and not last_action_was_load
         ):
-            forced_action = 6
+            forced_action = 6  # LoadGifts
 
-        # 2. W BAZIE I PUSTY BAK -> ŁADUJ MARCHEWKI (ID 5)
-        # (Opcjonalnie, jeśli w train.py to miałeś)
-        elif dist_to_base <= problem.D and current_state_obj.carrot_count < 20:
-            forced_action = 5
+        # B. Tankowanie (Baza)
+        elif dist_to_base <= problem.D and current_state_obj.carrot_count < 50:
+            forced_action = 5  # LoadCarrots
 
-        # 3. U CELU -> DOSTARCZ (ID 7)
+        # C. Dostarczanie i Nawigacja (W terenie)
         elif current_state_obj.loaded_gifts:
+            # Cel to zawsze pierwszy załadowany (bo są posortowane przez env)
             target_name = current_state_obj.loaded_gifts[0]
             target_gift = env.gifts_map[target_name]
-            dist = distance(current_state_obj.position, target_gift.destination)
+            dist_to_target = distance(
+                current_state_obj.position, target_gift.destination
+            )
 
-            if dist <= problem.D:
-                forced_action = 7  # Deliver
+            # 1. Jesteśmy w zasięgu -> Oddaj
+            if dist_to_target <= problem.D:
+                forced_action = 7  # DeliverGift
+            else:
+                # 2. Jesteśmy w trasie -> Użyj Autopilota zamiast sieci
+                forced_action = get_navigation_action(env, target_gift.destination)
 
-        # --- WYBÓR AKCJI ---
+        # D. Powrót do bazy (gdy pusto)
+        elif (
+            not current_state_obj.loaded_gifts and not current_state_obj.available_gifts
+        ):
+            # Koniec gry, czekamy
+            forced_action = 4
+        elif not current_state_obj.loaded_gifts:
+            # Wracamy do bazy po nową partię
+            forced_action = get_navigation_action(env, simulator.lapland_pos)
+
+        # Wybór akcji
         if forced_action is not None:
             action_id = forced_action
-            is_ai_action = False
+            source = "LOGIC"
         else:
-            # Epsilon = 0.0 -> Czysta eksploatacja wiedzy sieci (bez losowości)
+            # Fallback do sieci (rzadko używane przy pełnym autopilocie)
             action_id = agent.get_action(state, epsilon=0.0)
-            is_ai_action = True
+            source = "AI_NET"
 
-        # --- WYKONANIE KROKU ---
+        # Wykonanie
         next_state, reward, done, _ = env.step(action_id)
-        next_state = next_state.unsqueeze(0)
 
-        # Aktualizacja flagi logicznej
+        # Logika flagi
         if action_id == 6 and not env.state.loaded_gifts:
             last_action_was_load = True
         else:
             last_action_was_load = False
 
-        # --- LOGOWANIE ---
+        # Logowanie (tylko co 100 kroków lub przy ważnych akcjach)
         action_enum = env.ACTION_MAPPING[action_id]
-        pos = env.state.position
-        source = "LOGIC" if not is_ai_action else "AI_NET"
+        if (
+            action_enum in [Action.LoadGifts, Action.DeliverGift, Action.LoadCarrots]
+            or step % 100 == 0
+        ):
+            pos = env.state.position
+            print(
+                f"Step {step:4d} | [{source:7}] {action_enum.name:13} | "
+                f"Pos: {pos.c:6.0f},{pos.r:6.0f} | "
+                f"Gifts: {len(env.state.loaded_gifts):3} | "
+                f"Delivered: {len(env.state.delivered_gifts):3} | "
+                f"Reward: {reward:7.2f}"
+            )
 
-        # Wypisujemy co krok (lub co 10/100, jeśli za szybko leci)
-        print(
-            f"Step {step:4d} | [{source}] {action_enum.name:13} | "
-            f"Pos: {pos.c:6.0f},{pos.r:6.0f} | "
-            f"Gifts: {len(env.state.loaded_gifts):2} | "
-            f"Fuel: {env.state.carrot_count:3} | "
-            f"Reward: {reward:6.2f}"
-        )
-
-        state = next_state
+        state = next_state.unsqueeze(0)
         total_reward += reward
         step += 1
 
-        # Opcjonalne spowolnienie, żebyś widział co się dzieje
-        # time.sleep(0.05)
-
-    print("\n" + "=" * 30)
-    print("KONIEC SYMULACJI")
-    print(f"Całkowity wynik: {total_reward:.2f}")
-    print(
-        f"Dostarczono prezentów: {len(env.state.delivered_gifts)} / {len(problem.gifts)}"
-    )
-    print("=" * 30)
+    print(f"\nKONIEC. Wynik: {total_reward:.2f}")
+    print(f"Dostarczono: {len(env.state.delivered_gifts)} / {len(problem.gifts)}")
 
 
 if __name__ == "__main__":

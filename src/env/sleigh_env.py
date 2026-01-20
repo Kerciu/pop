@@ -57,6 +57,20 @@ class SleighEnv(gym.Env):
                 return self.gifts_map[g_name].destination
         return self.sim.lapland_pos
 
+    def _sort_loaded_gifts(self):
+        """
+        GAME CHANGER: Sortuje prezenty na saniach tak,
+        aby ten najbliższy aktualnej pozycji był na indexie 0.
+        """
+        if not self.state.loaded_gifts:
+            return
+
+        current_pos = self.state.position
+        # Sortowanie in-place
+        self.state.loaded_gifts.sort(
+            key=lambda g_name: distance(current_pos, self.gifts_map[g_name].destination)
+        )
+
     def step(self, action_id: int):
         reward = 0.0
         step_penalty = -0.01
@@ -106,9 +120,9 @@ class SleighEnv(gym.Env):
                     sim_action = Action.Floating
                     reward -= 1.0
                 else:
-                    param = 0
+                    param = 0  # Zawsze próbujemy oddać ten z wierzchu (index 0)
 
-        # 4. ŁADOWANIE (BEZ UPŁYWU CZASU)
+        # 4. ŁADOWANIE
         elif action_enum == Action.LoadGifts:
             dist_base = distance(self.state.position, self.sim.lapland_pos)
 
@@ -129,7 +143,7 @@ class SleighEnv(gym.Env):
                     reward -= 1.0
                 else:
                     try:
-                        # MANUALNA ZMIANA STANU (BYPASS SYMULATORA)
+                        # MANUALNA ZMIANA STANU (BYPASS)
                         loaded_count = 0
                         loaded_set = set(gifts_to_load_ids)
                         new_available = []
@@ -139,28 +153,37 @@ class SleighEnv(gym.Env):
                                 gift = self.gifts_map[g_name]
                                 self.state.loaded_gifts.append(g_name)
                                 self.state.sleigh_weight += gift.weight
-                                # UWAGA: TU JUŻ NIE DODAJEMY CZASU!
-                                # self.state.current_time += 1 <--- USUNIĘTE
+                                # Czas nie płynie przy ładowaniu (zgodnie z ustaleniami)
                                 loaded_count += 1
                             else:
                                 new_available.append(g_name)
 
                         self.state.available_gifts = new_available
 
+                        # --- OPTYMALIZACJA: Sortujemy po załadowaniu ---
+                        self._sort_loaded_gifts()
+                        # -----------------------------------------------
+
                         reward += 5.0 + loaded_count * 0.5
                         return self._finalize_step(
                             reward, step_penalty, len(self.state.delivered_gifts)
                         )
 
-                    except Exception as e:
-                        print(f"Błąd LoadGifts: {e}")
+                    except Exception:
+                        # print(f"Błąd LoadGifts: {e}") # Debug off
                         return self.encoder.encode(self.state), -50.0, True, {}
 
-        # WYKONANIE
+        # WYKONANIE STANDARDOWE
         if action_enum != Action.LoadGifts:
             prev_delivered = len(self.state.delivered_gifts)
             try:
                 self.state = self.sim.apply_action(self.state, sim_action, param)
+
+                # --- OPTYMALIZACJA: Jeśli dostarczyliśmy, sortujemy resztę ---
+                if action_enum == Action.DeliverGift:
+                    self._sort_loaded_gifts()
+                # -------------------------------------------------------------
+
             except Exception:
                 return self.encoder.encode(self.state), -50.0, True, {}
             return self._finalize_step(reward, step_penalty, prev_delivered)
@@ -171,31 +194,27 @@ class SleighEnv(gym.Env):
         target_pos = self._get_target_pos()
         curr_dist = distance(self.state.position, target_pos)
 
-        # Obliczamy prędkość całkowitą
+        # Prędkość
         velocity_mag = (self.state.velocity.vc**2 + self.state.velocity.vr**2) ** 0.5
 
-        # 1. Zmiana w nagrodzie za dystans:
-        # Dajemy nagrodę TYLKO jeśli prędkość jest rozsądna (< 50).
-        # To zniechęci do bycia rakietą.
+        # Reward Shaping
         dist_improvement = self.prev_dist - curr_dist
         if abs(dist_improvement) < 1000:
             if velocity_mag < 50:
                 reward += dist_improvement * 0.5
             else:
-                # Jeśli leci za szybko, nie dostaje nagrody za dystans, a nawet lekką karę
-                reward -= 0.1
+                reward -= 0.1  # Kara za latanie rakietą
 
         self.prev_dist = curr_dist
 
-        # 2. Kara za "Latanie nad celem":
-        # Jeśli jesteśmy blisko (< 2000), a prędkość jest ogromna (> 100), duża kara.
+        # Kara za latanie nad celem z dużą prędkością
         if curr_dist < 2000 and velocity_mag > 100:
             reward -= 5.0
 
-        # Nagroda za dostarczenie (Bez zmian, bardzo wysoka)
+        # Nagroda za dostarczenie
         curr_delivered = len(self.state.delivered_gifts)
         if curr_delivered > prev_delivered:
-            reward += 10000.0  # Jackpot!
+            reward += 10000.0
             new_target = self._get_target_pos()
             self.prev_dist = distance(self.state.position, new_target)
 
@@ -211,6 +230,6 @@ class SleighEnv(gym.Env):
             or abs(self.state.position.r) > self.map_limit
         ):
             done = True
-            reward -= 100.0  # Większa kara za śmierć
+            reward -= 100.0
 
         return self.encoder.encode(self.state), reward, done, {}
