@@ -4,7 +4,7 @@ import pygame
 
 
 class Visualizer:
-    def __init__(self, problem, width=1000, height=1000):
+    def __init__(self, problem, width=800, height=800):
         pygame.init()
         self.width = width
         self.height = height
@@ -12,24 +12,29 @@ class Visualizer:
         pygame.display.set_caption("Santa Sleigh RL Visualization")
         self.font = pygame.font.SysFont("Arial", 18)
         self.clock = pygame.time.Clock()
-
         self.problem = problem
 
-        # Skalowanie mapy do okna
-        # Zakładamy mapę +/- 100 000. Jeśli wyjdzie poza, Mikołaj zniknie z ekranu.
-        self.map_limit = 120000
-        self.scale = width / (self.map_limit * 2)
+        # --- AUTOMATYCZNE SKALOWANIE WIDOKU ---
+        max_coord = 10.0
+        for g in problem.gifts:
+            max_coord = max(max_coord, abs(g.destination.c), abs(g.destination.r))
 
-        # Kolory
+        # Margines wizualny (np. 1.5x)
+        self.map_limit = max_coord * 1.5
+        self.scale = width / (self.map_limit * 2)
+        print(f"🖥️  Skala wizualizacji: 1 jednostka = {self.scale:.2f} px")
+        # --------------------------------------
+
+        # Kolory (bez zmian)
         self.COLOR_BG = (30, 30, 30)
-        self.COLOR_BASE = (50, 150, 255)  # Niebieski
-        self.COLOR_GIFT = (0, 200, 100)  # Zielony
-        self.COLOR_GIFT_DELIVERED = (100, 100, 100)  # Szary
-        self.COLOR_SANTA = (255, 50, 50)  # Czerwony
-        self.COLOR_TRAIL = (255, 255, 50)  # Żółty
+        self.COLOR_BASE = (50, 150, 255)
+        self.COLOR_GIFT = (0, 200, 100)
+        self.COLOR_GIFT_DELIVERED = (100, 100, 100)
+        self.COLOR_SANTA = (255, 50, 50)
+        self.COLOR_TRAIL = (255, 255, 50)
         self.COLOR_TEXT = (255, 255, 255)
 
-        self.trail = []  # Historia pozycji
+        self.trail = []
 
     def _to_screen(self, c, r):
         """Konwertuje współrzędne świata gry na piksele ekranu."""

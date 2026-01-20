@@ -14,11 +14,23 @@ class SleighEnv(gym.Env):
     def __init__(self, problem: Problem, simulator: Simulator):
         self.problem = problem
         self.sim = simulator
-        self.encoder = StateEncoder(problem, simulator)
+
+        # --- AUTOMATYCZNE SKALOWANIE MAPY ---
+        max_coord = 100.0  # Domyślne minimum
+        for g in problem.gifts:
+            max_coord = max(max_coord, abs(g.destination.c), abs(g.destination.r))
+
+        # Dodajemy 20% marginesu, żeby agent nie uderzał w ścianę przy krawędzi
+        self.map_limit = max_coord * 1.2
+        print(f"🌍 Wykryto rozmiar mapy: +/- {self.map_limit:.1f}")
+        # ------------------------------------
+
+        # Przekazujemy wykryty limit do Encodera
+        self.encoder = StateEncoder(problem, simulator, map_limit=self.map_limit)
+
         self.state = None
         self.prev_dist = 0.0
         self.gifts_map = {g.name: g for g in problem.gifts}
-        self.map_limit = 100000.0
         self.MAX_FUEL = 300
 
         self.ACTION_MAPPING = {

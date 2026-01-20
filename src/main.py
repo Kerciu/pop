@@ -12,9 +12,12 @@ from env.sleigh_env import SleighEnv
 from visualizer import Visualizer
 
 # --- KONFIGURACJA ---
+# --- INPUTY ---
 DEFAULT_INPUT = "data/huge_challenge.in.txt"
-MODEL_PATH = "models_saved/dqn_santa_huge.pth"
 # DEFAULT_INPUT = "data/b_better_hurry.in.txt"
+# --- MODELE ---
+MODEL_PATH = "models_saved/santa_genetic_best.pth"
+# MODEL_PATH = "models_saved/dqn_santa_huge.pth"
 # MODEL_PATH = "models_saved/dqn_santa_pure.pth"
 
 

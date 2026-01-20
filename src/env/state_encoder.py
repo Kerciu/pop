@@ -8,22 +8,16 @@ from models.sleigh_state import SleighState
 
 
 class StateEncoder:
-    def __init__(self, problem: Problem, simulator):
+    # Dodajemy parametr map_limit do __init__
+    def __init__(self, problem: Problem, simulator, map_limit=100000.0):
         self.problem = problem
         self.sim = simulator
         self.gifts_map = {g.name: g for g in problem.gifts}
 
-        self.MAX_COORD = 100000.0
-        self.MAX_VELOCITY = 100.0
+        # Używamy dynamicznego limitu!
+        self.MAX_COORD = float(map_limit)
+        self.MAX_VELOCITY = 100.0  # To można zostawić, albo też skalować
 
-        # 0: Loaded?
-        # 1: Low Fuel?
-        # 2: DX (norm)
-        # 3: DY (norm)
-        # 4: VX (norm)
-        # 5: VY (norm)
-        # 6: Must Brake!
-        # 7: Last was Accel
         self.output_size = 8
 
     def _get_active_target(self, state: SleighState):
@@ -51,9 +45,11 @@ class StateEncoder:
         )
         must_brake = calculate_braking_signal(dist, velocity_towards, max_acc)
 
+        # Normalizacja
         features = [
             1.0 if state.loaded_gifts else 0.0,
             1.0 if state.carrot_count < 20 else 0.0,
+            # Kluczowe: używamy self.MAX_COORD
             max(-1.0, min(1.0, dx / self.MAX_COORD)),
             max(-1.0, min(1.0, dy / self.MAX_COORD)),
             state.velocity.vc / self.MAX_VELOCITY,
