@@ -27,15 +27,14 @@ class Simulator:
 
     def reset(self) -> SleighState:
         """Inicjalizuje stan symulacji dla nowego epizodu."""
-        # Tworzymy nową instancję Coordinate ręcznie
         start_pos = Coordinate(self.lapland_pos.c, self.lapland_pos.r)
 
         self.state = SleighState(
             current_time=0,
             position=start_pos,
             velocity=Velocity(0, 0),
-            carrot_count=20,
-            sleigh_weight=10.0,  # Waga bazowa sań
+            carrot_count=20,  # Startujemy z pełnym bakiem, żeby nie ginął w 1. kroku
+            sleigh_weight=10.0,
             available_gifts=list(self.all_gifts_map.keys()),
             loaded_gifts=[],
             delivered_gifts=[],
@@ -50,12 +49,11 @@ class Simulator:
         self.state.position.r += self.state.velocity.vr
         self.state.current_time += 1
 
-        # Floating resetuje flagę przyspieszenia
         self.state.last_action_was_acceleration = False
 
     def handle_action(self, ax: float, ay: float, load_cmd: int, fuel_cmd: int):
         """
-        Obsługuje natychmiastowe zmiany stanu (bez upływu czasu).
+        Obsługuje natychmiastowe zmiany stanu.
         """
         # 1. Fizyka (Przyspieszenie)
         if ax != 0 or ay != 0:
@@ -63,32 +61,31 @@ class Simulator:
             self.state.velocity.vr += ay
             self.state.last_action_was_acceleration = True
 
+            # POPRAWKA: Przyspieszenie zużywa 1 marchewkę
+            self.state.carrot_count -= 1
+
         # 2. Paliwo
         if fuel_cmd > 0:
             self.state.carrot_count = 20
             self.state.last_action_was_acceleration = False
 
-        # 3. Ładowanie prezentów (POPRAWKA: Sprawdzamy fizykę zamiast pola max_weight)
+        # 3. Ładowanie prezentów
         if load_cmd == 1:
             self.state.last_action_was_acceleration = False
 
             gifts_to_load = []
-            # Symulujemy dodawanie prezentów
             current_simulated_weight = self.state.sleigh_weight
 
             for gift_id in list(self.state.available_gifts):
                 gift = self.all_gifts_map[gift_id]
                 new_weight = current_simulated_weight + gift.weight
 
-                # Sprawdzamy, czy po dodaniu tego prezentu sanie będą miały jakiekolwiek przyspieszenie
-                # Jeśli get_max_acceleration zwraca 0, to znaczy, że jesteśmy przeciążeni.
+                # Sprawdzamy czy udźwigniemy
                 if self.accel_table.get_max_acceleration_for_weight(new_weight) > 0:
                     gifts_to_load.append(gift_id)
                     current_simulated_weight += gift.weight
 
-            # Zatwierdzamy zmiany
             for g in gifts_to_load:
-                gift = self.all_gifts_map[g]
                 self.state.available_gifts.remove(g)
                 self.state.loaded_gifts.append(g)
                 self.state.sleigh_weight += gift.weight
