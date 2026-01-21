@@ -10,7 +10,7 @@ from env.sleigh_env import SleighEnv
 from output.output_writer import OutputWriter
 from visualizer import Visualizer
 
-MODEL_PATH = "models_saved/santa_dueling_smart.pth"
+MODEL_PATH = "models_saved/santa_fuel_fixed.pth"
 INPUT_FILE = "data/huge_challenge.in.txt"  # Upewnij się, że masz ten plik
 
 
@@ -21,7 +21,7 @@ def run_training(env, agent, args):
         os.makedirs("models_saved")
 
     epsilon = 1.0
-    epsilon_decay = 0.997  # Wolniejszy decay, niech więcej eksploruje
+    epsilon_decay = 0.999  # Wolniejszy decay, niech więcej eksploruje
     epsilon_min = 0.05
 
     best_avg_reward = -float("inf")

@@ -38,7 +38,7 @@ class DQNAgent:
         self.action_size = action_size
         self.memory = deque(maxlen=100000)
         self.gamma = 0.99
-        self.batch_size = 64
+        self.batch_size = 128
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.policy_net = DuelingDQN(state_size, action_size).to(self.device)

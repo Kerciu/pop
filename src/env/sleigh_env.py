@@ -26,6 +26,7 @@ class SleighEnv:
         # Parametry normalizacji (do tensora)
         self.max_coord = 200000.0  # Przybliżony rozmiar mapy
         self.max_vel = 200.0  # Przybliżona max prędkość
+        FUEL_RESERVE_THRESHOLD = 5
 
     def reset(self):
         self.sim.reset()
@@ -152,27 +153,36 @@ class SleighEnv:
         return self._get_observation(), reward, done, {}
 
     def _get_distance_to_current_target(self):
+        # PRIORYTET 1: PALIWO
+        if self.state.carrot_count <= self.FUEL_RESERVE_THRESHOLD:
+            # Włączamy tryb paniki - cel to Baza
+            return distance(self.state.position, self.sim.lapland_pos)
+
+        # PRIORYTET 2: DOSTARCZANIE
         if self.state.loaded_gifts:
-            # Lecimy do klienta
             gift_id = self.state.loaded_gifts[0]
-            # POPRAWKA: Pobieramy .destination z prezentu
             target_pos = self.sim.all_gifts_map[gift_id].destination
             return distance(self.state.position, target_pos)
+
+        # PRIORYTET 3: POWRÓT PO TOWAR
         else:
-            # Wracamy do bazy (lub startujemy)
             return distance(self.state.position, self.sim.lapland_pos)
 
     def _get_observation(self):
         s = self.state
 
-        # Ustalanie celu
-        if s.loaded_gifts:
-            # POPRAWKA: Pobieramy .destination z prezentu
-            target_pos = self.sim.all_gifts_map[s.loaded_gifts[0]].destination
-            target_type = 1.0  # Gift
-        else:
+        # Logika wyboru celu dla tensora
+        target_pos = self.sim.lapland_pos
+        target_type = -1.0  # Domyślnie baza
+
+        if s.carrot_count <= self.FUEL_RESERVE_THRESHOLD:
+            # REZERWA: Cel to baza, typ celu to Baza (-1.0)
             target_pos = self.sim.lapland_pos
-            target_type = -1.0  # Base
+            target_type = -1.0
+        elif s.loaded_gifts:
+            # PRACA: Cel to klient
+            target_pos = self.sim.all_gifts_map[s.loaded_gifts[0]].destination
+            target_type = 1.0
 
         dx = target_pos.c - s.position.c
         dy = target_pos.r - s.position.r
