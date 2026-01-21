@@ -22,6 +22,12 @@ class Simulator:
         self.all_gifts_map = all_gifts_map
         self.lapland_pos = lapland_pos
 
+        # --- ZMIANA 1: DEFINICJA POJEMNOŚCI BAKU ---
+        # Ustalamy bak na podstawie zasięgu mapy (np. 1 marchewka na 2000 jednostek)
+        # Ale nie mniej niż 50.
+        # Przy huge_challenge (ok. +/- 100k) to da spory zapas.
+        self.MAX_FUEL = 50
+
         # RL State holder
         self.state: SleighState = None
 
@@ -33,7 +39,7 @@ class Simulator:
             current_time=0,
             position=start_pos,
             velocity=Velocity(0, 0),
-            carrot_count=20,  # Startujemy z pełnym bakiem, żeby nie ginął w 1. kroku
+            carrot_count=self.MAX_FUEL,  # --- ZMIANA 2: PEŁNY BAK NA START ---
             sleigh_weight=10.0,
             available_gifts=list(self.all_gifts_map.keys()),
             loaded_gifts=[],
@@ -44,29 +50,26 @@ class Simulator:
 
     def step(self):
         """Przesuwa czas o 1 (Floating) i aktualizuje pozycję."""
-        # x = x + vx, y = y + vy
         self.state.position.c += self.state.velocity.vc
         self.state.position.r += self.state.velocity.vr
         self.state.current_time += 1
-
         self.state.last_action_was_acceleration = False
 
     def handle_action(self, ax: float, ay: float, load_cmd: int, fuel_cmd: int):
-        """
-        Obsługuje natychmiastowe zmiany stanu.
-        """
         # 1. Fizyka (Przyspieszenie)
         if ax != 0 or ay != 0:
             self.state.velocity.vc += ax
             self.state.velocity.vr += ay
             self.state.last_action_was_acceleration = True
 
-            # POPRAWKA: Przyspieszenie zużywa 1 marchewkę
+            # Zużycie paliwa
             self.state.carrot_count -= 1
 
         # 2. Paliwo
         if fuel_cmd > 0:
-            self.state.carrot_count = 20
+            self.state.carrot_count = (
+                self.MAX_FUEL
+            )  # --- ZMIANA 3: TANKOWANIE DO PEŁNA ---
             self.state.last_action_was_acceleration = False
 
         # 3. Ładowanie prezentów
@@ -80,7 +83,6 @@ class Simulator:
                 gift = self.all_gifts_map[gift_id]
                 new_weight = current_simulated_weight + gift.weight
 
-                # Sprawdzamy czy udźwigniemy
                 if self.accel_table.get_max_acceleration_for_weight(new_weight) > 0:
                     gifts_to_load.append(gift_id)
                     current_simulated_weight += gift.weight
