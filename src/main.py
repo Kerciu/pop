@@ -7,26 +7,22 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from agents.dqn_agent import DQNAgent
 from core.loader import load_problem
 from env.sleigh_env import SleighEnv
-from output.output_writer import OutputWriter  # Upewnij się, że masz ten plik
+from output.output_writer import OutputWriter
 from visualizer import Visualizer
 
-# MODEL_PATH = "models_saved/santa_fuel_fixed.pth"
-# INPUT_FILE = "data/huge_challenge.in.txt"
-
-MODEL_PATH = "models_saved/santa_mini_test.pth"
-INPUT_FILE = "data/mini_challenge.in.txt"
+# NOWY PLIK ZAPISU - CZYSTY START
+MODEL_PATH = "models_saved/santa_final_try.pth"
+INPUT_FILE = "data/huge_challenge.in.txt"
 
 
 def run_training(env, agent, args):
-    print(f"--- START TRENINGU DUELING DQN ({args.episodes} odcinków) ---")
-
+    print(f"--- START TRENINGU ({args.episodes} odcinków) ---")
     if not os.path.exists("models_saved"):
         os.makedirs("models_saved")
 
     epsilon = 1.0
-    epsilon_decay = 0.995
+    epsilon_decay = 0.999  # Szybki start na małej mapie
     epsilon_min = 0.05
-
     best_avg_reward = -float("inf")
     recent_rewards = []
 
@@ -39,51 +35,46 @@ def run_training(env, agent, args):
         while not done:
             action = agent.get_action(state, epsilon)
             next_state, reward, done, _ = env.step(action)
-
             agent.remember(state, action, reward, next_state, done)
             agent.update()
-
             state = next_state
             total_reward += reward
             steps += 1
-
-            if steps > 2500:
+            if steps > 2000:
                 break
 
         if epsilon > epsilon_min:
             epsilon *= epsilon_decay
-
         recent_rewards.append(total_reward)
         if len(recent_rewards) > 50:
             recent_rewards.pop(0)
-
         avg_reward = sum(recent_rewards) / len(recent_rewards)
 
         if e % 10 == 0:
             print(
-                f"Ep {e:4d} | Avg Score: {avg_reward:8.2f} | Epsilon: {epsilon:.2f} | Steps: {steps} | Deliv: {len(env.state.delivered_gifts)}"
+                f"Ep {e:4d} | Avg: {avg_reward:8.2f} | Eps: {epsilon:.2f} | Steps: {steps} | Deliv: {len(env.state.delivered_gifts)}"
             )
             agent.update_target_network()
 
-        if avg_reward > best_avg_reward and e > 100:
+        # Zapisuj częściej, ale tylko jak wynik jest sensowny (nie same kary)
+        if avg_reward > best_avg_reward and e > 20:
             best_avg_reward = avg_reward
             agent.save(MODEL_PATH)
-            print(f"💾 Zapisano model! Nowy rekord średniej: {best_avg_reward:.2f}")
+            print(f"💾 Zapisano rekord: {best_avg_reward:.2f}")
 
 
 def run_evaluation(env, agent, args):
-    print("--- START EWALUACJI ---")
-    if os.path.exists(MODEL_PATH):
-        try:
-            agent.load(MODEL_PATH)
-            print(f"✅ Wczytano model: {MODEL_PATH}")
-        except:
-            print("❌ Błąd ładowania modelu. Używam losowych wag.")
+    print("--- EWALUACJA ---")
+    try:
+        agent.load(MODEL_PATH)
+        print(f"✅ Wczytano: {MODEL_PATH}")
+    except:
+        print("❌ Brak modelu!")
+        return
 
     agent.policy_net.eval()
     writer = OutputWriter()
     viz = Visualizer(env.problem) if args.render else None
-
     state = env.reset()
     done = False
     total_reward = 0
@@ -105,76 +96,52 @@ def run_evaluation(env, agent, args):
     ]
 
     while not done:
-        # 1. Pobieramy dane symulacji PRZED krokiem (z obiektu env.state, nie z tensora)
         carrots_before = env.state.carrot_count
         loaded_before = set(env.state.loaded_gifts)
         delivered_before = set(env.state.delivered_gifts)
-
-        # Zapisujemy prędkość, aby obliczyć przyspieszenie
         vc_before = env.state.velocity.vc
         vr_before = env.state.velocity.vr
 
-        # 2. Wykonanie akcji
         action = agent.get_action(state, epsilon=0.0)
-        next_state_tensor, reward, done, _ = env.step(action)  # next_state to tensor!
-        action_name = action_names[action]
+        next_state, reward, done, _ = env.step(action)
 
-        # 3. LOGIKA ZAPISU (Porównujemy env.state po kroku z zapisanymi before)
-
-        # A. Ruch
+        # Zapis logiki
         if action < 8:
-            # Porównujemy aktualną prędkość z poprzednią
             dv_c = abs(env.state.velocity.vc - vc_before)
             dv_r = abs(env.state.velocity.vr - vr_before)
-            acc_val = max(dv_c, dv_r)
-
-            writer.record_move(action_name, int(acc_val))
+            # Zabezpieczenie przed 0 w pliku (parser wymaga >0 dla acc)
+            val = int(max(dv_c, dv_r))
+            if val == 0:
+                val = 1
+            writer.record_move(action_names[action], val)
             writer.record_move("FLOAT", 1)
-
-        # B. Float
         elif action == 8:
             writer.record_move("FLOAT", 1)
-
-        # C. Load Gifts
         elif action == 9:
-            current_loaded = set(env.state.loaded_gifts)
-            new_gifts = current_loaded - loaded_before
-            for gift_id in new_gifts:
-                writer.record_load_gift(gift_id)
-
-        # D. Fuel
+            for gid in set(env.state.loaded_gifts) - loaded_before:
+                writer.record_load_gift(gid)
         elif action == 10:
-            diff = env.state.carrot_count - carrots_before
-            if diff > 0:
-                writer.record_load_carrots(diff)
-
-        # E. Deliver
+            if env.state.carrot_count > carrots_before:
+                writer.record_load_carrots(env.state.carrot_count - carrots_before)
         elif action == 11:
-            current_delivered = set(env.state.delivered_gifts)
-            new_delivered = current_delivered - delivered_before
-            for gift_id in new_delivered:
-                writer.record_deliver_gift(gift_id)
+            for gid in set(env.state.delivered_gifts) - delivered_before:
+                writer.record_deliver_gift(gid)
 
-        # 4. Wizualizacja
-        pos = env.state.position
         if viz:
-            viz.render(env, action_name, reward, step)
-
-        if action >= 8 or step % 50 == 0:
+            viz.render(env, action_names[action], reward, step)
+        if step % 20 == 0 or action >= 9:
             print(
-                f"Step {step:4d} | {action_name:10} | Pos: {pos.c:4.0f},{pos.r:4.0f} | R: {reward:6.1f} | Gifts: {len(env.state.loaded_gifts)}"
+                f"Step {step:4d} | {action_names[action]:10} | Pos: {env.state.position.c:.0f},{env.state.position.r:.0f} | R: {reward:6.1f}"
             )
 
-        state = next_state_tensor
+        state = next_state
         total_reward += reward
         step += 1
-
-        if step > 2500:
-            print("❌ Przekroczono limit kroków.")
+        if step > 3000:
             break
 
     print(
-        f"Koniec. Wynik: {total_reward:.2f}. Dostarczono: {len(env.state.delivered_gifts)}"
+        f"Koniec. Wynik: {total_reward}. Dostarczono: {len(env.state.delivered_gifts)}"
     )
     writer.save("solution.txt")
 
@@ -182,7 +149,7 @@ def run_evaluation(env, agent, args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=["train", "eval"])
-    parser.add_argument("--episodes", type=int, default=3000)
+    parser.add_argument("--episodes", type=int, default=1000)
     parser.add_argument("--render", action="store_true")
     args = parser.parse_args()
 

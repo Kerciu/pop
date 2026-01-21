@@ -22,24 +22,20 @@ class Simulator:
         self.all_gifts_map = all_gifts_map
         self.lapland_pos = lapland_pos
 
-        # --- ZMIANA 1: DEFINICJA POJEMNOŚCI BAKU ---
-        # Ustalamy bak na podstawie zasięgu mapy (np. 1 marchewka na 2000 jednostek)
-        # Ale nie mniej niż 50.
-        # Przy huge_challenge (ok. +/- 100k) to da spory zapas.
-        self.MAX_FUEL = 50
+        # PARAMETRY PALIWOWE
+        # Ustawiamy duży bak, żeby agent miał swobodę na start
+        self.MAX_FUEL = 100
 
-        # RL State holder
         self.state: SleighState = None
 
     def reset(self) -> SleighState:
-        """Inicjalizuje stan symulacji dla nowego epizodu."""
         start_pos = Coordinate(self.lapland_pos.c, self.lapland_pos.r)
 
         self.state = SleighState(
             current_time=0,
             position=start_pos,
             velocity=Velocity(0, 0),
-            carrot_count=self.MAX_FUEL,  # --- ZMIANA 2: PEŁNY BAK NA START ---
+            carrot_count=self.MAX_FUEL,  # Start z pełnym bakiem
             sleigh_weight=10.0,
             available_gifts=list(self.all_gifts_map.keys()),
             loaded_gifts=[],
@@ -49,56 +45,54 @@ class Simulator:
         return self.state
 
     def step(self):
-        """Przesuwa czas o 1 (Floating) i aktualizuje pozycję."""
+        """Fizyka ruchu i upływ czasu."""
         self.state.position.c += self.state.velocity.vc
         self.state.position.r += self.state.velocity.vr
         self.state.current_time += 1
         self.state.last_action_was_acceleration = False
 
     def handle_action(self, ax: float, ay: float, load_cmd: int, fuel_cmd: int):
-        # 1. Fizyka (Przyspieszenie)
+        # 1. RUCH (Przyspieszenie) - KOSZTUJE PALIWO!
         if ax != 0 or ay != 0:
             self.state.velocity.vc += ax
             self.state.velocity.vr += ay
             self.state.last_action_was_acceleration = True
 
-            # Zużycie paliwa
+            # --- EKONOMIA MARCHEWKOWA ---
+            # Każda zmiana prędkości kosztuje!
             self.state.carrot_count -= 1
+            # ----------------------------
 
-        # 2. Paliwo
+        # 2. TANKOWANIE
         if fuel_cmd > 0:
-            self.state.carrot_count = (
-                self.MAX_FUEL
-            )  # --- ZMIANA 3: TANKOWANIE DO PEŁNA ---
+            self.state.carrot_count = self.MAX_FUEL
             self.state.last_action_was_acceleration = False
 
-        # 3. Ładowanie prezentów
+        # 3. ŁADOWANIE
         if load_cmd == 1:
             self.state.last_action_was_acceleration = False
-
             gifts_to_load = []
-            current_simulated_weight = self.state.sleigh_weight
+            curr_weight = self.state.sleigh_weight
 
             for gift_id in list(self.state.available_gifts):
                 gift = self.all_gifts_map[gift_id]
-                new_weight = current_simulated_weight + gift.weight
-
+                new_weight = curr_weight + gift.weight
+                # Sprawdzenie czy uciągnie
                 if self.accel_table.get_max_acceleration_for_weight(new_weight) > 0:
                     gifts_to_load.append(gift_id)
-                    current_simulated_weight += gift.weight
+                    curr_weight += gift.weight
 
             for g in gifts_to_load:
                 self.state.available_gifts.remove(g)
                 self.state.loaded_gifts.append(g)
                 self.state.sleigh_weight += gift.weight
 
-        # 4. Dostarczanie prezentów
+        # 4. DOSTARCZANIE
         elif load_cmd == -1:
             self.state.last_action_was_acceleration = False
             if self.state.loaded_gifts:
                 gift_id = self.state.loaded_gifts[0]
                 gift = self.all_gifts_map[gift_id]
-
                 self.state.loaded_gifts.pop(0)
                 self.state.delivered_gifts.append(gift_id)
                 self.state.sleigh_weight -= gift.weight
