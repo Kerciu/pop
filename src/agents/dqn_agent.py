@@ -33,10 +33,10 @@ class DuelingDQN(nn.Module):
 
 
 class DQNAgent:
-    def __init__(self, state_size, action_size, learning_rate=0.001):
+    def __init__(self, state_size, action_size, learning_rate=0.0001):
         self.state_size = state_size
         self.action_size = action_size
-        self.memory = deque(maxlen=20000)
+        self.memory = deque(maxlen=100000)
         self.gamma = 0.99
         self.batch_size = 64
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

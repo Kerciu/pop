@@ -87,9 +87,9 @@ class SleighEnv:
                     reward += 50.0
                     self.base_interaction_locked = True
                 else:
-                    reward -= 5.0  # Kara za spamowanie bez sensu
+                    reward -= 1.0  # Kara za spamowanie bez sensu
             else:
-                reward -= 5.0  # Kara za próbę ładowania poza bazą/zablokowaną
+                reward -= 1.0  # Kara za próbę ładowania poza bazą/zablokowaną
 
         elif action_id == 10:  # Fuel
             if dist_to_base <= self.problem.D and not self.base_interaction_locked:
@@ -100,9 +100,9 @@ class SleighEnv:
                         True  # Blokujemy też tankowanie w tej wizycie
                     )
                 else:
-                    reward -= 5.0
+                    reward -= 1.0
             else:
-                reward -= 5.0
+                reward -= 1.0
 
         # Grupa C: Dostarczanie (11)
         elif action_id == 11:  # Deliver
@@ -119,9 +119,9 @@ class SleighEnv:
                     reward += 1000.0
                     self.base_interaction_locked = False
                 else:
-                    reward -= 10.0  # Kara za zrzut w polu
+                    reward -= 2.0  # Kara za zrzut w polu
             else:
-                reward -= 10.0  # Nie masz co zrzucać
+                reward -= 2.0  # Nie masz co zrzucać
 
         # 3. Aktualizacja stanu i nagrody za postęp
         self.state = self.sim.state
@@ -207,3 +207,8 @@ class SleighEnv:
     @property
     def input_size(self):
         return 14  # Rozmiar listy feats
+
+    @property
+    def gifts_map(self):
+        """Przekierowanie dla Visualizera i starego kodu."""
+        return self.sim.all_gifts_map

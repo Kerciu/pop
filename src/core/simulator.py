@@ -34,7 +34,7 @@ class Simulator:
             current_time=0,
             position=start_pos,
             velocity=Velocity(0, 0),
-            carrot_count=0,
+            carrot_count=20,
             sleigh_weight=10.0,  # Waga bazowa sań
             available_gifts=list(self.all_gifts_map.keys()),
             loaded_gifts=[],
