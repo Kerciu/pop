@@ -7,11 +7,14 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from agents.dqn_agent import DQNAgent
 from core.loader import load_problem
 from env.sleigh_env import SleighEnv
-from output.output_writer import OutputWriter
+from output.output_writer import OutputWriter  # Upewnij się, że masz ten plik
 from visualizer import Visualizer
 
-MODEL_PATH = "models_saved/santa_fuel_fixed.pth"
-INPUT_FILE = "data/huge_challenge.in.txt"  # Upewnij się, że masz ten plik
+# MODEL_PATH = "models_saved/santa_fuel_fixed.pth"
+# INPUT_FILE = "data/huge_challenge.in.txt"
+
+MODEL_PATH = "models_saved/santa_mini_test.pth"
+INPUT_FILE = "data/mini_challenge.in.txt"
 
 
 def run_training(env, agent, args):
@@ -21,7 +24,7 @@ def run_training(env, agent, args):
         os.makedirs("models_saved")
 
     epsilon = 1.0
-    epsilon_decay = 0.999  # Wolniejszy decay, niech więcej eksploruje
+    epsilon_decay = 0.995
     epsilon_min = 0.05
 
     best_avg_reward = -float("inf")
@@ -44,11 +47,9 @@ def run_training(env, agent, args):
             total_reward += reward
             steps += 1
 
-            # Safety break jeśli kręci się w kółko
             if steps > 2500:
                 break
 
-        # Logika po epizodzie
         if epsilon > epsilon_min:
             epsilon *= epsilon_decay
 
@@ -80,10 +81,7 @@ def run_evaluation(env, agent, args):
             print("❌ Błąd ładowania modelu. Używam losowych wag.")
 
     agent.policy_net.eval()
-
-    # Inicjalizacja pisarza
     writer = OutputWriter()
-
     viz = Visualizer(env.problem) if args.render else None
 
     state = env.reset()
@@ -107,64 +105,57 @@ def run_evaluation(env, agent, args):
     ]
 
     while not done:
-        # 1. Pobieramy stan PRZED akcją, żeby porównać zmiany
+        # 1. Pobieramy dane symulacji PRZED krokiem (z obiektu env.state, nie z tensora)
         carrots_before = env.state.carrot_count
         loaded_before = set(env.state.loaded_gifts)
         delivered_before = set(env.state.delivered_gifts)
 
-        # 2. Wykonanie akcji przez agenta
+        # Zapisujemy prędkość, aby obliczyć przyspieszenie
+        vc_before = env.state.velocity.vc
+        vr_before = env.state.velocity.vr
+
+        # 2. Wykonanie akcji
         action = agent.get_action(state, epsilon=0.0)
-        next_state, reward, done, _ = env.step(action)
+        next_state_tensor, reward, done, _ = env.step(action)  # next_state to tensor!
         action_name = action_names[action]
 
-        # 3. LOGIKA ZAPISU DO PLIKU (Tłumaczenie RL -> Format Zadania)
+        # 3. LOGIKA ZAPISU (Porównujemy env.state po kroku z zapisanymi before)
 
-        # A. Ruch (Acc/Max)
+        # A. Ruch
         if action < 8:
-            # Musimy obliczyć o ile zmieniła się prędkość
-            dv_c = abs(next_state.velocity.vc - state.velocity.vc)
-            dv_r = abs(next_state.velocity.vr - state.velocity.vr)
-            acc_val = max(dv_c, dv_r)  # Jedna z nich będzie > 0
+            # Porównujemy aktualną prędkość z poprzednią
+            dv_c = abs(env.state.velocity.vc - vc_before)
+            dv_r = abs(env.state.velocity.vr - vr_before)
+            acc_val = max(dv_c, dv_r)
 
-            # Dodajemy wpis do pliku (AccUp {val})
             writer.record_move(action_name, int(acc_val))
-
-            # Po ruchu następuje automatyczny Float 1s (zgodnie z logiką sleigh_env)
             writer.record_move("FLOAT", 1)
 
-        # B. Float (Czysty)
+        # B. Float
         elif action == 8:
             writer.record_move("FLOAT", 1)
 
         # C. Load Gifts
         elif action == 9:
-            # Sprawdzamy co doszło do listy
-            current_loaded = set(next_state.loaded_gifts)
+            current_loaded = set(env.state.loaded_gifts)
             new_gifts = current_loaded - loaded_before
-
-            # W pliku wynikowym każdy prezent to osobna linia
             for gift_id in new_gifts:
-                # Musimy pobrać nazwę prezentu (np. "Olivia") z mapy
-                gift_obj = env.sim.all_gifts_map[gift_id]
-                writer.record_load_gift(
-                    gift_id
-                )  # Zakładam, że ID to imię, jeśli nie - użyj gift_obj.name
+                writer.record_load_gift(gift_id)
 
         # D. Fuel
         elif action == 10:
-            diff = next_state.carrot_count - carrots_before
+            diff = env.state.carrot_count - carrots_before
             if diff > 0:
                 writer.record_load_carrots(diff)
 
         # E. Deliver
         elif action == 11:
-            current_delivered = set(next_state.delivered_gifts)
+            current_delivered = set(env.state.delivered_gifts)
             new_delivered = current_delivered - delivered_before
-
             for gift_id in new_delivered:
                 writer.record_deliver_gift(gift_id)
 
-        # 4. Wizualizacja i logi
+        # 4. Wizualizacja
         pos = env.state.position
         if viz:
             viz.render(env, action_name, reward, step)
@@ -174,7 +165,7 @@ def run_evaluation(env, agent, args):
                 f"Step {step:4d} | {action_name:10} | Pos: {pos.c:4.0f},{pos.r:4.0f} | R: {reward:6.1f} | Gifts: {len(env.state.loaded_gifts)}"
             )
 
-        state = next_state
+        state = next_state_tensor
         total_reward += reward
         step += 1
 
@@ -185,8 +176,6 @@ def run_evaluation(env, agent, args):
     print(
         f"Koniec. Wynik: {total_reward:.2f}. Dostarczono: {len(env.state.delivered_gifts)}"
     )
-
-    # Zapisz plik wynikowy
     writer.save("solution.txt")
 
 
@@ -199,8 +188,6 @@ if __name__ == "__main__":
 
     problem, simulator = load_problem(INPUT_FILE)
     env = SleighEnv(problem, simulator)
-
-    # Inicjalizacja agenta z dynamicznym rozmiarem wejścia
     agent = DQNAgent(env.input_size, env.ACTION_SPACE_SIZE)
 
     if args.mode == "train":
