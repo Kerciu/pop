@@ -10,7 +10,7 @@ from env.sleigh_env import SleighEnv
 from output.output_writer import OutputWriter
 from visualizer import Visualizer
 
-MODEL_PATH = "models_saved/santa_final_try.pth"
+MODEL_PATH = "models_saved/santa_final.pth"
 INPUT_FILE = "data/huge_challenge.in.txt"
 
 

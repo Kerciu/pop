@@ -19,7 +19,7 @@ Kluczowym wyzwaniem była fizyka ruchu w środowisku bez tarcia. Pozycja sań $P
 
 $$P_{t+1} = P_t + V_t$$
 
-Dodatkowym ograniczeniem jest masa całkowita (sanie + prezenty + paliwo), która determinuje maksymalne możliwe przyspieszenie. [cite_start]Przeładowanie sań uniemożliwia sterowanie.
+Dodatkowym ograniczeniem jest masa całkowita (sanie + prezenty + paliwo), która determinuje maksymalne możliwe przyspieszenie. Przeładowanie sań uniemożliwia sterowanie.
 
 ---
 
