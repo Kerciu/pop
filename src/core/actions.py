@@ -118,7 +118,6 @@ def load_carrots(
 
 
 def solve_knapsack_greedy(available_gifts_ids, gifts_map, max_weight, current_weight):
-    """(Twój poprawny algorytm z poprzedniego kroku - bez zmian)"""
     remaining_capacity = max_weight - current_weight
     if remaining_capacity <= 0:
         return []

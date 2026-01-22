@@ -11,23 +11,18 @@ class GeneticAgent(nn.Module):
         self.fc2 = nn.Linear(128, 128)
         self.fc3 = nn.Linear(128, action_size)
 
-        # Wykrywanie urządzenia
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.to(self.device)
 
-        # Wyłączamy gradienty - nie potrzebujemy ich w genetyce!
         for param in self.parameters():
             param.requires_grad = False
 
     def forward(self, x):
-        # 1. Konwersja na Tensor (jeśli to numpy array)
         if not isinstance(x, torch.Tensor):
             x = torch.tensor(x, dtype=torch.float32)
 
-        # 2. PRZENIESIENIE NA URZĄDZENIE (TO NAPRAWIA BŁĄD)
         x = x.to(self.device)
 
-        # 3. Obsługa wymiarów (batch dimension)
         if x.dim() == 1:
             x = x.unsqueeze(0)
 
@@ -44,10 +39,10 @@ class GeneticAgent(nn.Module):
         """Tworzy zmutowanego klona tego agenta."""
         child = copy.deepcopy(self)
         for param in child.parameters():
-            if len(param.shape) > 1:  # Wagi
+            if len(param.shape) > 1:
                 noise = torch.randn_like(param) * mutation_power
                 param.data += noise
-            else:  # Bias
+            else:
                 noise = torch.randn_like(param) * mutation_power
                 param.data += noise
         return child

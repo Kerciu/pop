@@ -1,5 +1,0 @@
-- Consider changing MAX_WEIGHT from hard-coded to problem based -> route_planner adjustment
-- Loading gifts: nearest FROM BASE -> nearest from base, nearest to the loaded one etc. -> route_planner adjustment
-- You can accelerate by more than 1 -> motion_control adjustment
-- Think about deciding which axle handle first (based on velocity, distance etc) -> motion_control adjustment
-- Loading carrots (now hard-coded amount) -> smart_solver but needs to be separated to new module

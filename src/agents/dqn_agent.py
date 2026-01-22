@@ -14,12 +14,10 @@ class DuelingDQN(nn.Module):
             nn.Linear(input_dim, 128), nn.ReLU(), nn.Linear(128, 128), nn.ReLU()
         )
 
-        # Value Stream (Ocenia jak dobry jest stan)
         self.value_stream = nn.Sequential(
             nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 1)
         )
 
-        # Advantage Stream (Ocenia przewagę każdej akcji nad innymi)
         self.advantage_stream = nn.Sequential(
             nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, output_dim)
         )
@@ -28,7 +26,6 @@ class DuelingDQN(nn.Module):
         features = self.feature_layer(x)
         values = self.value_stream(features)
         advantages = self.advantage_stream(features)
-        # Combine: Q = V + (A - mean(A))
         return values + (advantages - advantages.mean(dim=1, keepdim=True))
 
 
@@ -79,7 +76,6 @@ class DQNAgent:
             self.device
         )
 
-        # DDQN Logic: Wybierz akcję siecią Policy, Oceń siecią Target
         with torch.no_grad():
             next_actions = self.policy_net(next_states).argmax(1).unsqueeze(1)
             next_q_values = (
@@ -93,7 +89,6 @@ class DQNAgent:
 
         self.optimizer.zero_grad()
         loss.backward()
-        # Gradient clipping dla stabilności
         torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
         self.optimizer.step()
 

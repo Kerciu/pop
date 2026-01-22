@@ -10,7 +10,6 @@ from env.sleigh_env import SleighEnv
 from output.output_writer import OutputWriter
 from visualizer import Visualizer
 
-# NOWY PLIK ZAPISU - CZYSTY START
 MODEL_PATH = "models_saved/santa_final_try.pth"
 INPUT_FILE = "data/huge_challenge.in.txt"
 
@@ -21,7 +20,7 @@ def run_training(env, agent, args):
         os.makedirs("models_saved")
 
     epsilon = 1.0
-    epsilon_decay = 0.999  # Szybki start na małej mapie
+    epsilon_decay = 0.999
     epsilon_min = 0.05
     best_avg_reward = -float("inf")
     recent_rewards = []
@@ -56,7 +55,6 @@ def run_training(env, agent, args):
             )
             agent.update_target_network()
 
-        # Zapisuj częściej, ale tylko jak wynik jest sensowny (nie same kary)
         if avg_reward > best_avg_reward and e > 20:
             best_avg_reward = avg_reward
             agent.save(MODEL_PATH)
@@ -105,11 +103,9 @@ def run_evaluation(env, agent, args):
         action = agent.get_action(state, epsilon=0.0)
         next_state, reward, done, _ = env.step(action)
 
-        # Zapis logiki
         if action < 8:
             dv_c = abs(env.state.velocity.vc - vc_before)
             dv_r = abs(env.state.velocity.vr - vr_before)
-            # Zabezpieczenie przed 0 w pliku (parser wymaga >0 dla acc)
             val = int(max(dv_c, dv_r))
             if val == 0:
                 val = 1

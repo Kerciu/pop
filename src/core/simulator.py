@@ -22,8 +22,6 @@ class Simulator:
         self.all_gifts_map = all_gifts_map
         self.lapland_pos = lapland_pos
 
-        # PARAMETRY PALIWOWE
-        # Ustawiamy duży bak, żeby agent miał swobodę na start
         self.MAX_FUEL = 100
 
         self.state: SleighState = None
@@ -35,7 +33,7 @@ class Simulator:
             current_time=0,
             position=start_pos,
             velocity=Velocity(0, 0),
-            carrot_count=self.MAX_FUEL,  # Start z pełnym bakiem
+            carrot_count=self.MAX_FUEL,
             sleigh_weight=10.0,
             available_gifts=list(self.all_gifts_map.keys()),
             loaded_gifts=[],
@@ -52,23 +50,18 @@ class Simulator:
         self.state.last_action_was_acceleration = False
 
     def handle_action(self, ax: float, ay: float, load_cmd: int, fuel_cmd: int):
-        # 1. RUCH (Przyspieszenie) - KOSZTUJE PALIWO!
         if ax != 0 or ay != 0:
             self.state.velocity.vc += ax
             self.state.velocity.vr += ay
             self.state.last_action_was_acceleration = True
 
-            # --- EKONOMIA MARCHEWKOWA ---
-            # Każda zmiana prędkości kosztuje!
             self.state.carrot_count -= 1
             # ----------------------------
 
-        # 2. TANKOWANIE
         if fuel_cmd > 0:
             self.state.carrot_count = self.MAX_FUEL
             self.state.last_action_was_acceleration = False
 
-        # 3. ŁADOWANIE
         if load_cmd == 1:
             self.state.last_action_was_acceleration = False
             gifts_to_load = []
@@ -77,7 +70,6 @@ class Simulator:
             for gift_id in list(self.state.available_gifts):
                 gift = self.all_gifts_map[gift_id]
                 new_weight = curr_weight + gift.weight
-                # Sprawdzenie czy uciągnie
                 if self.accel_table.get_max_acceleration_for_weight(new_weight) > 0:
                     gifts_to_load.append(gift_id)
                     curr_weight += gift.weight
@@ -87,7 +79,6 @@ class Simulator:
                 self.state.loaded_gifts.append(g)
                 self.state.sleigh_weight += gift.weight
 
-        # 4. DOSTARCZANIE
         elif load_cmd == -1:
             self.state.last_action_was_acceleration = False
             if self.state.loaded_gifts:
